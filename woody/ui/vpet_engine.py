@@ -19,13 +19,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from woody.utils.logging import get_logger
+from woody.utils.paths import get_vpet_dir
 
 log = get_logger(__name__)
 
 # Paths
-_MODULE_DIR = Path(__file__).parent
-_ROOT_DIR = _MODULE_DIR.parent.parent
-VPET_MAIN_DIR = _ROOT_DIR / "vpet" / "VPet-main"
+VPET_MAIN_DIR = get_vpet_dir() / "VPet-main"
 VPET_MOD_CORE = VPET_MAIN_DIR / "VPet-Simulator.Windows" / "mod" / "0000_core"
 
 SAVE_DIR = Path.home() / ".woody"

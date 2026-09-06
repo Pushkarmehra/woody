@@ -212,33 +212,73 @@ def open_app(app_name: str) -> dict:
         os.startfile("ms-settings:")
         return {"success": True, "message": "Opened Windows Settings."}
 
-    # 1. Try dynamic locator
+    # 1. Check if user passed a web URL or web platform (e.g. 'youtube', 'github.com', 'https://...', 'youtube on edge')
+    try:
+        from woody.tools.builtin.browser_tools import WEB_PLATFORMS, open_url, search_site
+
+        # Check for pattern "<site> on <browser>"
+        if " on " in clean_name or " in " in clean_name:
+            sep = " on " if " on " in clean_name else " in "
+            parts = clean_name.split(sep, 1)
+            target_site = parts[0].strip()
+            target_browser = parts[1].strip()
+            if target_site in WEB_PLATFORMS or target_site.startswith(("http://", "https://", "www.")) or "." in target_site:
+                return open_url(target_site, browser=target_browser)
+
+        if clean_name in WEB_PLATFORMS or clean_name.startswith(("http://", "https://", "www.")) or (
+            clean_name.endswith((".com", ".org", ".io", ".net", ".ai", ".tv", ".co")) and " " not in clean_name
+        ):
+            return open_url(clean_name)
+    except Exception:
+        pass
+
+    # 2. Try dynamic Windows application locator
     resolved_path = find_windows_app(clean_name)
     if resolved_path:
         try:
             os.startfile(resolved_path)
             return {"success": True, "message": f"Opened {app_name}."}
-        except Exception as e:
+        except Exception:
             try:
                 subprocess.Popen([resolved_path], shell=False)
                 return {"success": True, "message": f"Opened {app_name}."}
             except Exception as e2:
                 return {"success": False, "error": f"Failed to launch {resolved_path}: {e2}"}
 
-    # 2. Try alias or direct execution
-    exe = APP_ALIASES.get(clean_name, clean_name)
-    try:
-        os.startfile(exe)
-        return {"success": True, "message": f"Opened {app_name} ({exe})."}
-    except Exception:
+    # 3. Try alias lookup
+    if clean_name in APP_ALIASES:
+        exe = APP_ALIASES[clean_name]
         try:
-            subprocess.Popen(f'start "" "{exe}"', shell=True)
+            os.startfile(exe)
             return {"success": True, "message": f"Opened {app_name}."}
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Could not find or open application '{app_name}'. Error: {e}",
-            }
+        except Exception:
+            try:
+                subprocess.Popen([exe], shell=False)
+                return {"success": True, "message": f"Opened {app_name}."}
+            except Exception as e:
+                return {"success": False, "error": f"Could not launch {exe}: {e}"}
+
+    # 4. Check if command exists in PATH via 'where'
+    try:
+        res = subprocess.run(["where", clean_name], capture_output=True, text=True, timeout=1)
+        if res.returncode == 0:
+            lines = [l.strip() for l in res.stdout.splitlines() if l.strip()]
+            if lines:
+                exe_path = lines[0]
+                try:
+                    os.startfile(exe_path)
+                    return {"success": True, "message": f"Opened {app_name}."}
+                except Exception:
+                    subprocess.Popen([exe_path], shell=False)
+                    return {"success": True, "message": f"Opened {app_name}."}
+    except Exception:
+        pass
+
+    return {
+        "success": False,
+        "error": f"Could not find application or website '{app_name}'. Please verify the name.",
+    }
+
 
 
 
@@ -502,7 +542,8 @@ def analyze_screen(custom_prompt: str = "") -> dict:
         pass
 
     windows_info = get_open_windows().get("windows", [])
-    open_windows_str = ", ".join(windows_info[:5]) if windows_info else "None visible"
+    open_titles = [w.get("title", "") for w in windows_info if isinstance(w, dict) and w.get("title")]
+    open_windows_str = ", ".join(open_titles[:5]) if open_titles else "None visible"
 
     out_path = ""
     screen_text = ""

@@ -27,7 +27,9 @@ class BrowserAgent(BaseAgent):
     AGENT_NAME = "browser_agent"
     ALLOWED_ACTIONS = {
         "search_web",
+        "search_site",
         "navigate_to",
+        "open_url",
         "get_page_text",
         "download_file",
         "take_page_screenshot",
@@ -50,11 +52,28 @@ class BrowserAgent(BaseAgent):
                 return AgentResult(success=False, output=None, error="No search query provided.")
             return await self._search_web(query, open_browser=params.get("open_browser", False))
 
-        elif action == "navigate_to":
-            url = params.get("url") or params.get("link", "")
+        elif action == "search_site":
+            from woody.tools.builtin.browser_tools import search_site as do_search_site
+            query = params.get("query") or params.get("q") or params.get("search_query", "")
+            site = params.get("site") or params.get("platform", "youtube")
+            browser = params.get("browser", "")
+            if not query:
+                return AgentResult(success=False, output=None, error="No search query provided.")
+            res = do_search_site(query=query, site=site, browser=browser)
+            if res.get("success"):
+                return AgentResult(success=True, output=res.get("message", f"Searched '{query}' on {site}."))
+            return AgentResult(success=False, output=None, error=res.get("error", "Failed to search site."))
+
+        elif action in ("navigate_to", "open_url"):
+            from woody.tools.builtin.browser_tools import open_url as do_open_url
+            url = params.get("url") or params.get("link") or params.get("site", "")
+            browser = params.get("browser", "")
             if not url:
                 return AgentResult(success=False, output=None, error="No URL provided.")
-            return await self._navigate_to(url)
+            res = do_open_url(url=url, browser=browser)
+            if res.get("success"):
+                return AgentResult(success=True, output=res.get("message", f"Opened {url}."))
+            return AgentResult(success=False, output=None, error=res.get("error", f"Could not open {url}."))
 
         elif action == "get_page_text":
             url = params.get("url", "")

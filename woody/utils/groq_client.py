@@ -40,8 +40,8 @@ def _clean_key(key: str | None) -> str:
     return key.strip().strip("'\"")
 
 # Default Groq Models
-DEFAULT_MODEL = "llama-3.3-70b-versatile"
-FAST_MODEL = "llama-3.1-8b-instant"
+DEFAULT_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+FAST_MODEL = "openai/gpt-oss-20b"
 GROQ_API_BASE = "https://api.groq.com/openai/v1"
 
 # Message Roles
@@ -251,8 +251,8 @@ class GroqClient:
             resp.raise_for_status()
             data = resp.json()
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                log.warning("groq.model_not_found_fallback", requested=target_model)
+            if e.response.status_code in (400, 404):
+                log.warning("groq.model_fallback_triggered", requested=target_model, status=e.response.status_code)
                 available = await self.list_models()
                 fallback = self._select_best_fallback(available)
                 log.info("groq.fallback_model_selected", fallback=fallback)
@@ -338,34 +338,37 @@ class GroqClient:
                 json=payload,
                 headers=self._get_headers(),
             ) as resp:
-                if resp.status_code == 404:
+                if resp.status_code in (400, 404):
                     available = await self.list_models()
-                    chat_models = [m for m in available if not m.startswith("whisper") and not m.startswith("meta-llama/llama-prompt")]
-                    if chat_models:
-                        payload["model"] = chat_models[0]
-                        async with client.stream(
-                            "POST",
-                            "/chat/completions",
-                            json=payload,
-                            headers=self._get_headers(),
-                        ) as fb_resp:
-                            fb_resp.raise_for_status()
-                            async for line in fb_resp.aiter_lines():
-                                if not line:
+                    fallback = self._select_best_fallback(available)
+                    log.info("groq.stream_fallback_selected", fallback=fallback)
+                    self._resolved_model_cache[target_model] = fallback
+                    if model:
+                        self._resolved_model_cache[model] = fallback
+                    payload["model"] = fallback
+                    async with client.stream(
+                        "POST",
+                        "/chat/completions",
+                        json=payload,
+                        headers=self._get_headers(),
+                    ) as fb_resp:
+                        fb_resp.raise_for_status()
+                        async for line in fb_resp.aiter_lines():
+                            if not line:
+                                continue
+                            if line.startswith("data: "):
+                                data_str = line[6:].strip()
+                                if data_str == "[DONE]":
+                                    break
+                                try:
+                                    chunk = json.loads(data_str)
+                                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                    content = delta.get("content", "")
+                                    if content:
+                                        yield content
+                                except Exception:
                                     continue
-                                if line.startswith("data: "):
-                                    data_str = line[6:].strip()
-                                    if data_str == "[DONE]":
-                                        break
-                                    try:
-                                        chunk = json.loads(data_str)
-                                        delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                        content = delta.get("content", "")
-                                        if content:
-                                            yield content
-                                    except Exception:
-                                        continue
-                        return
+                    return
 
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
@@ -397,14 +400,21 @@ class GroqClient:
         """
         Send a multimodal request to Groq Vision or fallback gracefully.
         """
+        available = await self.list_models()
+        vision_models = [m for m in available if "vision" in m.lower() and not m.startswith("meta-llama/llama-prompt")]
+
+        if not vision_models:
+            raise RuntimeError("No active Groq Vision models available on this account.")
+
+        target_vision_model = model if (model and model in vision_models) else vision_models[0]
+
         encoded_images = []
         if images:
             for img_bytes in images:
                 encoded_images.append(base64.b64encode(img_bytes).decode("utf-8"))
 
         msg = Message(role=ROLE_USER, content=prompt, images=encoded_images)
-        vision_model = model or "llama-3.2-11b-vision-preview"
-        return await self.chat(model=vision_model, messages=[msg], temperature=temperature)
+        return await self.chat(model=target_vision_model, messages=[msg], temperature=temperature)
 
     def _select_best_fallback(self, available: list[str]) -> str:
         """Select best available chat model from list."""

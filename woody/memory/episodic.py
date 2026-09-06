@@ -1,17 +1,19 @@
-﻿"""
-Episodic Memory — SQLite session log with sqlite-vec vector search.
+"""
+Episodic Memory — SQLite session log with full-text search & vector search.
 
 Stores past sessions/tasks with outcomes so Woody can recall
-"like last time" context and avoid repeating failed approaches.
+"like last time" context, answer "what did I ask earlier?", and avoid repeating failed approaches.
 
 Schema:
-  sessions: id, timestamp, user_request, intent, result_summary, success, duration_ms
-  tool_calls: id, session_id, tool_name, inputs_json, output_json, tier, confirmed, timestamp
+  sessions: id, timestamp, user_request, intent, result_summary, success, duration_ms, tool_calls
+  tool_calls: id, session_id, tool_name, inputs, output, tier, confirmed, timestamp
 
-Vector embeddings stored in sqlite-vec for semantic recall.
+Vector embeddings stored in sqlite-vec for semantic recall if available, with robust
+LIKE/token-matching fallback.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import sqlite3
 import time
@@ -46,7 +48,7 @@ class EpisodicMemory:
         mem.open()
         mem.log_session(session_id="abc", user_request="Open Notepad", ...)
         history = mem.get_recent(n=5)
-        similar = mem.search_similar("open a text editor", n=3)
+        similar = mem.search("open a text editor", n=3)
     """
 
     def __init__(self, db_path: str | Path = "~/.Woody/episodic.db") -> None:
@@ -95,6 +97,7 @@ class EpisodicMemory:
             );
 
             CREATE INDEX IF NOT EXISTS idx_sessions_ts ON sessions(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_sessions_req ON sessions(user_request);
             CREATE INDEX IF NOT EXISTS idx_tool_session ON tool_calls(session_id);
         """)
         self._conn.commit()
@@ -130,7 +133,8 @@ class EpisodicMemory:
         tool_call_count: int = 0,
     ) -> None:
         """Log a completed session."""
-        assert self._conn
+        if not self._conn:
+            return
         self._conn.execute(
             """INSERT OR REPLACE INTO sessions
                (id, timestamp, user_request, intent, result_summary, success, duration_ms, tool_calls)
@@ -150,7 +154,8 @@ class EpisodicMemory:
         confirmed: bool | None = None,
     ) -> None:
         """Log a single tool call within a session."""
-        assert self._conn
+        if not self._conn:
+            return
         self._conn.execute(
             """INSERT INTO tool_calls
                (id, session_id, tool_name, inputs, output, tier, confirmed, timestamp)
@@ -166,11 +171,75 @@ class EpisodicMemory:
 
     def get_recent(self, n: int = 5) -> list[dict]:
         """Return the n most recent sessions."""
-        assert self._conn
+        if not self._conn:
+            return []
         rows = self._conn.execute(
             "SELECT * FROM sessions ORDER BY timestamp DESC LIMIT ?", (n,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_recent_summary(self, n: int = 5) -> list[dict]:
+        """Return structured recent session records with formatted timestamps."""
+        sessions = self.get_recent(n=n)
+        result = []
+        for s in sessions:
+            ts = datetime.datetime.fromtimestamp(s["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
+            result.append({
+                "session_id": s["id"],
+                "time": ts,
+                "request": s["user_request"],
+                "intent": s.get("intent", ""),
+                "result": s.get("result_summary", ""),
+                "success": bool(s.get("success", 1)),
+            })
+        return result
+
+    def search(self, query: str, n: int = 5) -> list[dict]:
+        """
+        Search past sessions for keyword/sub-string matches across user requests,
+        intents, and result summaries.
+        """
+        if not self._conn or not query or not query.strip():
+            return self.get_recent_summary(n=n)
+
+        terms = [t.strip() for t in query.strip().split() if len(t.strip()) > 1]
+        if not terms:
+            terms = [query.strip()]
+
+        where_clauses = []
+        params = []
+        for term in terms:
+            term_param = f"%{term}%"
+            where_clauses.append("(user_request LIKE ? OR intent LIKE ? OR result_summary LIKE ?)")
+            params.extend([term_param, term_param, term_param])
+
+        where_sql = " OR ".join(where_clauses)
+        sql = f"""
+            SELECT * FROM sessions
+            WHERE {where_sql}
+            ORDER BY timestamp DESC
+            LIMIT ?
+        """
+        params.append(n)
+
+        rows = self._conn.execute(sql, params).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            ts = datetime.datetime.fromtimestamp(d["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
+            result.append({
+                "session_id": d["id"],
+                "time": ts,
+                "request": d["user_request"],
+                "intent": d.get("intent", ""),
+                "result": d.get("result_summary", ""),
+                "success": bool(d.get("success", 1)),
+            })
+        return result
+
+    def search_similar(self, query: str, n: int = 3) -> list[dict]:
+        """Alias for search."""
+        return self.search(query=query, n=n)
 
     def format_history_for_prompt(self, n: int = 3) -> str:
         """Format recent session history for inclusion in the planner prompt."""
@@ -179,12 +248,12 @@ class EpisodicMemory:
             return ""
         lines = []
         for s in sessions:
-            import datetime
             ts = datetime.datetime.fromtimestamp(s["timestamp"]).strftime("%H:%M")
             status = "✓" if s["success"] else "✗"
             lines.append(f"{status} [{ts}] {s['user_request']} → {s['result_summary'][:80]}")
         return "\n".join(lines)
 
     def get_session_count(self) -> int:
-        assert self._conn
+        if not self._conn:
+            return 0
         return self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]

@@ -30,14 +30,13 @@ from typing import Callable, Any
 from PIL import Image, ImageTk
 
 from woody.utils.logging import get_logger
+from woody.utils.paths import get_vpet_vup_dir, get_gifs_dir
 
 log = get_logger(__name__)
 
 # Paths
-_MODULE_DIR = Path(__file__).parent
-_ROOT_DIR = _MODULE_DIR.parent.parent
-VPET_VUP_DIR = _ROOT_DIR / "vpet" / "VPet-main" / "VPet-Simulator.Windows" / "mod" / "0000_core" / "pet" / "vup"
-FALLBACK_GIF_DIR = _ROOT_DIR / "gifs"
+VPET_VUP_DIR = get_vpet_vup_dir()
+FALLBACK_GIF_DIR = get_gifs_dir()
 
 
 class VPetGraphEngine:

@@ -231,6 +231,8 @@ class WoodyKernel:
             ollama_client=self.llm_client,
             confirm_callback=self._confirm_callback,
             critic=self.critic,
+            semantic_memory=self.semantic,
+            episodic_memory=self.episodic,
         )
 
         tone = self.semantic.get().tone if self.semantic else "concise"
@@ -362,12 +364,21 @@ class WoodyKernel:
         screen_context = self._get_screen_ocr_text() if needs_screen else ""
         clipboard_context = self._clipboard.get_current() if self._clipboard else ""
 
-        # Formatted multi-turn dialogue memory
+        # Formatted multi-turn dialogue memory and persistent user knowledge
         dialogue_history = self.kernel_memory.format_dialogue_for_prompt(n=6)
-        task_history = (
-            dialogue_history
-            or (self.episodic.format_history_for_prompt(n=3) if self.episodic else "")
-        )
+        user_memory_context = self.semantic.format_for_prompt() if self.semantic else ""
+
+        history_parts = []
+        if user_memory_context:
+            history_parts.append(f"User Profile & Memories:\n{user_memory_context}")
+        if dialogue_history:
+            history_parts.append(f"Recent Dialogue:\n{dialogue_history}")
+        elif self.episodic:
+            ep_hist = self.episodic.format_history_for_prompt(n=3)
+            if ep_hist:
+                history_parts.append(f"Recent Sessions:\n{ep_hist}")
+
+        task_history = "\n\n".join(history_parts)
 
         # --- Plan ---
         assert self.planner
@@ -516,6 +527,14 @@ class WoodyKernel:
     def _fast_format_response(self, state: WorkingMemoryState) -> str | None:
         """Instantly format simple responses without invoking the synthesizer LLM."""
         subtasks = state.get("subtasks", [])
+        if not subtasks:
+            return None
+
+        # Handle multi-app launch (e.g. open notepad and calculator)
+        if len(subtasks) > 1 and all(t.get("action") == "open_app" and t.get("status") == "done" for t in subtasks):
+            apps = [t.get("params", {}).get("app_name", "app") for t in subtasks]
+            return f"Opened {', '.join(apps[:-1])} and {apps[-1]}." if len(apps) > 1 else f"Opened {apps[0]}."
+
         if len(subtasks) == 1 and subtasks[0].get("status") == "done":
             task = subtasks[0]
             agent = task.get("agent")
@@ -528,7 +547,20 @@ class WoodyKernel:
                 return res
 
             if isinstance(res, dict):
-                if action == "open_app":
+                if action == "search_site":
+                    msg = res.get("message")
+                    if msg:
+                        return msg
+                    query = task.get("params", {}).get("query", "")
+                    site = task.get("params", {}).get("site", "website")
+                    return f"Searched for '{query}' on {site}."
+                elif action in ("navigate_to", "open_url"):
+                    msg = res.get("message")
+                    if msg:
+                        return msg
+                    url = task.get("params", {}).get("url", "website")
+                    return f"Opened {url}."
+                elif action == "open_app":
                     app = task.get("params", {}).get("app_name", "application")
                     return f"{app} is up and ready." if res.get("success") else f"Could not launch {app}: {res.get('error')}"
                 elif action == "close_app":
@@ -573,6 +605,27 @@ class WoodyKernel:
                     if results:
                         return "\n".join(f"• {r.get('title', '')}: {r.get('snippet', '')}" for r in results[:3])
                     return f"Here's what I found for '{task.get('params', {}).get('query', '')}'."
+
+                elif action in ("remember", "remember_fact", "save_note"):
+                    return res.get("message", "Committed to memory.")
+                elif action in ("recall", "list_memories"):
+                    query = task.get("params", {}).get("query", "").lower()
+                    data = res.get("data", {})
+                    if query == "name":
+                        name = data.get("name") or data.get("facts", {}).get("name")
+                        return f"Your name is {name}." if name else "I don't have your name stored yet."
+                    summary = res.get("summary")
+                    return summary or "I don't have any matching memories stored."
+                elif action in ("forget", "forget_all"):
+                    return res.get("message", "Memory updated.")
+                elif action == "search_history":
+                    sessions = res.get("sessions", [])
+                    if not sessions:
+                        return "I didn't find any matching past sessions in history."
+                    lines = ["Here is what I found in past history:"]
+                    for s in sessions[:3]:
+                        lines.append(f"• [{s.get('time', '')[:16]}] '{s.get('request', '')}' → {s.get('result', '')[:60]}")
+                    return "\n".join(lines)
 
                 elif action in ("analyze_screen", "describe_window", "read_screen_text", "explain_error"):
                     analysis = res.get("analysis")

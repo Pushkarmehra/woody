@@ -17,14 +17,14 @@ import os
 import sys
 
 # ── Auto-switch to project virtual environment (.venv) ──
-# Ported from the Nex prototype launcher — ensures the correct venv
-# is active even when launched from a shortcut or system tray.
-_VENV_WIN  = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".venv", "Scripts", "python.exe"))
-_VENV_UNIX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".venv", "bin", "python"))
-_VENV_PYTHON = _VENV_WIN if os.name == "nt" else _VENV_UNIX
+# Only active when running from source, not when compiled as a frozen binary.
+if not getattr(sys, "frozen", False):
+    _VENV_WIN  = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".venv", "Scripts", "python.exe"))
+    _VENV_UNIX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".venv", "bin", "python"))
+    _VENV_PYTHON = _VENV_WIN if os.name == "nt" else _VENV_UNIX
 
-if os.path.exists(_VENV_PYTHON) and os.path.normcase(sys.executable) != os.path.normcase(_VENV_PYTHON):
-    os.execv(_VENV_PYTHON, [_VENV_PYTHON] + sys.argv)
+    if os.path.exists(_VENV_PYTHON) and os.path.normcase(sys.executable) != os.path.normcase(_VENV_PYTHON):
+        os.execv(_VENV_PYTHON, [_VENV_PYTHON] + sys.argv)
 
 import click
 from rich.console import Console
@@ -40,6 +40,7 @@ console = Console()
 @click.option("--web-ui", is_flag=True, help="Start with WebEngine overlay + FastAPI backend.")
 @click.option("--pet", is_flag=True, help="Start animated AI Desktop Pet companion.")
 @click.option("--serve", is_flag=True, help="Start FastAPI backend only (headless REST/SSE mode).")
+@click.option("--create-shortcuts", is_flag=True, help="Create Windows Desktop & Start Menu shortcuts with official icon.")
 @click.option("--eval", "run_eval", is_flag=True, help="Run the eval harness.")
 @click.option("--port", default=None, type=int, help="Override backend port (default: 8765).")
 @click.option(
@@ -55,6 +56,7 @@ def main(
     web_ui: bool,
     pet: bool,
     serve: bool,
+    create_shortcuts: bool,
     run_eval: bool,
     port: int | None,
     config: str | None,
@@ -63,6 +65,15 @@ def main(
     if version:
         console.print(f"[bold cyan]Woody[/bold cyan] v{__version__}")
         sys.exit(0)
+
+    if create_shortcuts:
+        from woody.utils.shortcuts import install_all_shortcuts
+        console.print("[bold cyan]Creating Windows Desktop & Start Menu shortcuts...[/bold cyan]")
+        created = install_all_shortcuts()
+        for p in created:
+            console.print(f"  [green]+[/green] {p}")
+        console.print("[bold green]All shortcuts created successfully![/bold green]")
+        return
 
     if run_eval:
         from woody.observability.eval.harness import cli_run

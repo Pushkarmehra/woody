@@ -20,10 +20,11 @@ import yaml
 
 from woody.utils.hardware import HardwareProfile, HardwareTier, detect_hardware
 from woody.utils.logging import get_logger
+from woody.utils.paths import get_default_config_path, get_config_dir
 
 log = get_logger(__name__)
 
-DEFAULT_CONFIG_PATH = Path(__file__).parent.parent.parent / "config" / "woody_config.yaml"
+DEFAULT_CONFIG_PATH = get_default_config_path()
 
 
 # ── Sub-config dataclasses ────────────────────────────────────────────────────
@@ -32,10 +33,10 @@ DEFAULT_CONFIG_PATH = Path(__file__).parent.parent.parent / "config" / "woody_co
 class ModelConfig:
     provider: str = "groq"
     timeout: float = 30.0
-    router: str = "llama-3.1-8b-instant"
-    planner: str = "llama-3.3-70b-versatile"
-    critic: str = "llama-3.1-8b-instant"
-    synthesizer: str = "llama-3.3-70b-versatile"
+    router: str = "openai/gpt-oss-20b"
+    planner: str = "openai/gpt-oss-120b"
+    critic: str = "openai/gpt-oss-20b"
+    synthesizer: str = "openai/gpt-oss-120b"
     vision: str = "llama-3.2-11b-vision-preview"
     embedding: str = ""
     speculative_decoding: bool = False
@@ -227,7 +228,7 @@ def load_config(config_path: str | Path | None = None) -> WoodyConfig:
 
 
 def _load_tier_models(tier: HardwareTier) -> dict[str, Any]:
-    tier_file = Path(__file__).parent.parent.parent / "config" / f"models_{tier.value}.yaml"
+    tier_file = get_config_dir() / f"models_{tier.value}.yaml"
     if tier_file.exists():
         with open(tier_file, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}

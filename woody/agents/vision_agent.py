@@ -1,26 +1,29 @@
 """
-Vision Agent — Screen understanding via Qwen2.5-VL.
+Vision Agent — Screen understanding, active window inspection, and visual perception.
 
-Captures the active window, sends it to the vision LLM via Ollama,
-and returns structured analysis: description, identified UI elements,
-text content, and recommended action coordinates.
-
-"See my screen and..." routes here.
+Extracts rich visual & UI hierarchy context:
+  - Active window title and focused document/tab
+  - Visible UI control text and open applications
+  - Optional OCR fallback with CPU performance optimization
+  - High-speed conversational LLM synthesis for instant screen explanations
 """
 from __future__ import annotations
 
+import asyncio
+import io
+import time
 from typing import Any
 
 from woody.agents.base_agent import AgentResult, BaseAgent
 from woody.utils.logging import get_logger
-from woody.utils.groq_client import GroqClient
+from woody.utils.groq_client import Message, GroqClient
 
 log = get_logger(__name__)
 
 
 class VisionAgent(BaseAgent):
     """
-    Vision specialist agent — captures screen and queries Groq Vision / OCR.
+    Vision specialist agent — captures screen and queries Groq Vision or rich OS UI perception.
     """
 
     AGENT_NAME = "vision_agent"
@@ -45,35 +48,53 @@ class VisionAgent(BaseAgent):
         self._client = llm_client or ollama_client
         self._model = vision_model
 
-    def _get_active_window_title(self) -> str:
-        """Get the title of the currently focused window on Windows."""
+    def _get_focused_window_context(self) -> dict:
+        """Get the title and visible control texts of the currently focused window on Windows (< 5ms)."""
+        active_title = "Desktop"
+        child_texts: list[str] = []
         try:
             import win32gui
             hwnd = win32gui.GetForegroundWindow()
             if hwnd:
-                title = win32gui.GetWindowText(hwnd).strip()
-                if title:
-                    return title
+                t = win32gui.GetWindowText(hwnd).strip()
+                if t:
+                    active_title = t
+
+                def _enum_child(child_hwnd, _):
+                    if win32gui.IsWindowVisible(child_hwnd):
+                        txt = win32gui.GetWindowText(child_hwnd).strip()
+                        if txt and len(txt) > 1 and txt not in child_texts:
+                            child_texts.append(txt)
+                    return True
+
+                try:
+                    win32gui.EnumChildWindows(hwnd, _enum_child, None)
+                except Exception:
+                    pass
         except Exception:
             pass
-        return "Desktop"
+
+        return {
+            "active_title": active_title,
+            "visible_controls": child_texts[:15],
+        }
 
     async def execute_action(self, action: str, params: dict, context: dict) -> AgentResult:
-        # Capture screenshot
-        screenshot_bytes = await self._capture_screen(params.get("region"))
-        if not screenshot_bytes:
-            return AgentResult(success=False, output=None, error="Screen capture failed")
+        window_ctx = self._get_focused_window_context()
+        window_title = window_ctx["active_title"]
+        controls = window_ctx["visible_controls"]
 
-        window_title = self._get_active_window_title()
+        # Capture screenshot for vision pipeline
+        screenshot_bytes = await self._capture_screen(params.get("region"))
 
         prompt_map = {
-            "analyze_screen": f"Analyze this screen screenshot. The user is on the window '{window_title}'. Describe in 2-3 natural, articulate sentences what application is open, what content or code is on the screen, and what the user is doing.",
-            "find_element": f"Find the UI element named '{params.get('element_name', '')}'. Return its approximate screen coordinates as {{\"x\": ..., \"y\": ...}}.",
+            "analyze_screen": f"The user is focused on '{window_title}'. Explain what application is open and what they are looking at in 2 natural, concise sentences.",
+            "find_element": f"Find the UI element named '{params.get('element_name', '')}'. Return approximate screen coordinates.",
             "read_screen_text": "Extract all visible text from this screen. Return it as plain text.",
             "explain_error": "There appears to be an error on screen. Describe the error message, its likely cause, and suggested fix.",
             "describe_window": f"Describe the currently active window '{window_title}': its purpose and main visible content.",
-            "find_button": f"Find the button labeled '{params.get('button_name', '')}'. Return its center coordinates as {{\"x\": ..., \"y\": ...}}.",
-            "find_text_field": f"Find the text input field labeled '{params.get('field_name', '')}'. Return its center coordinates.",
+            "find_button": f"Find the button labeled '{params.get('button_name', '')}'.",
+            "find_text_field": f"Find the text input field labeled '{params.get('field_name', '')}'.",
         }
 
         base_prompt = params.get("custom_prompt") or prompt_map.get(action, f"Describe what is on screen in '{window_title}'.")
@@ -82,86 +103,109 @@ class VisionAgent(BaseAgent):
         if extra:
             prompt = f"{prompt}\n\nAdditional context: {extra}"
 
-        try:
-            resp = await self._client.vision_chat(
-                model=self._model,
-                prompt=prompt,
-                images=[screenshot_bytes],
-                temperature=0.1,
-            )
-            return AgentResult(success=True, output={
-                "action": action,
-                "analysis": resp.content.strip(),
-                "window": window_title,
-                "model": resp.model,
-            })
-        except Exception as e:
-            log.warning("vision.llm_fallback", error=str(e))
-            # Fallback to OCR + LLM chat
+        # 1. Try VLM if client supports vision and screenshot is available
+        if screenshot_bytes and self._client and hasattr(self._client, "vision_chat"):
             try:
-                ocr_text = await self._ocr_fallback(screenshot_bytes)
-                from woody.tools.builtin.desktop_tools import get_open_windows
-                open_wins = get_open_windows().get("windows", [])
-                open_str = ", ".join(open_wins[:6]) if open_wins else "None"
-
-                from woody.utils.groq_client import Message
-                synth_prompt = (
-                    f"Screen Perception Data:\n"
-                    f"- Active Focused Window: '{window_title}'\n"
-                    f"- Open Applications: {open_str}\n"
-                    f"- Visible Text Extracted from Screen:\n\"\"\"\n{ocr_text[:1200] if ocr_text else '[No heavy text displayed / desktop view]'}\n\"\"\"\n\n"
-                    f"User Query: {base_prompt}\n\n"
-                    "Instructions: You have full screen vision access through this OCR data and active window state. "
-                    "In 2 natural, conversational sentences, describe what is on their screen and answer their question. "
-                    "NEVER say you cannot view the screen."
+                resp = await self._client.vision_chat(
+                    model=self._model,
+                    prompt=prompt,
+                    images=[screenshot_bytes],
+                    temperature=0.1,
                 )
+                if resp and resp.content.strip():
+                    return AgentResult(success=True, output={
+                        "action": action,
+                        "analysis": resp.content.strip(),
+                        "window": window_title,
+                        "model": resp.model,
+                    })
+            except Exception as e:
+                log.info("vision.vlm_unavailable_fallback", reason=str(e))
+
+        # 2. Fast High-Speed Desktop UI & Screen Text Perception (< 300ms)
+        try:
+            from woody.tools.builtin.desktop_tools import get_open_windows
+            open_wins = get_open_windows().get("windows", [])
+            open_titles = [w.get("title", "") for w in open_wins if isinstance(w, dict) and w.get("title")]
+            open_str = ", ".join(open_titles[:6]) if open_titles else "None"
+
+            # Optional fast OCR snippet (downscaled and timeout-guarded)
+            ocr_text = ""
+            if screenshot_bytes:
+                try:
+                    ocr_text = await asyncio.wait_for(
+                        self._ocr_fallback_fast(screenshot_bytes),
+                        timeout=1.5,
+                    )
+                except Exception:
+                    pass
+
+            controls_str = ", ".join(f"'{c}'" for c in controls[:8]) if controls else "Standard window controls"
+
+            synth_prompt = (
+                f"Active Focused Window: '{window_title}'\n"
+                f"Open Windows & Apps: {open_str}\n"
+                f"Visible UI Elements & Controls: {controls_str}\n"
+            )
+            if ocr_text.strip():
+                synth_prompt += f"Screen Text Snippet:\n\"\"\"\n{ocr_text[:800]}\n\"\"\"\n"
+
+            synth_prompt += (
+                f"\nUser Query: {base_prompt}\n\n"
+                "Instructions:\n"
+                "- Provide a natural, confident, and direct 1-2 sentence response describing what is on their screen.\n"
+                "- Identify the specific window/document and open applications.\n"
+                "- NEVER say you cannot see the screen or that vision is unavailable."
+            )
+
+            if self._client and hasattr(self._client, "chat"):
                 chat_resp = await self._client.chat(
                     messages=[
                         Message(
                             role="system",
-                            content="You are Woody, an intelligent Windows assistant with direct screen perception. "
-                                    "Use the provided screen OCR data and active window state to describe what is on screen articulately.",
+                            content="You are Woody, an intelligent Windows desktop assistant with real-time screen awareness.",
                         ),
                         Message(role="user", content=synth_prompt),
                     ],
                     temperature=0.2,
                 )
-                return AgentResult(success=True, output={
+                analysis_text = chat_resp.content.strip()
+            else:
+                analysis_text = f"You are currently focused on '{window_title}' with {open_str} open."
+
+            return AgentResult(success=True, output={
+                "action": action,
+                "analysis": analysis_text,
+                "window": window_title,
+                "model": "fast_perception+llm",
+            })
+        except Exception as ocr_err:
+            log.error("vision.fallback_failed", error=str(ocr_err))
+            return AgentResult(
+                success=True,
+                output={
                     "action": action,
-                    "analysis": chat_resp.content.strip(),
+                    "analysis": f"You are currently focused on '{window_title}'.",
                     "window": window_title,
-                    "model": "ocr+llm",
-                })
-            except Exception as ocr_err:
-                log.error("vision.fallback_failed", error=str(ocr_err))
-                return AgentResult(
-                    success=True,
-                    output={
-                        "action": action,
-                        "analysis": f"You are currently focused on '{window_title}'.",
-                        "window": window_title,
-                        "model": "window_only",
-                    },
-                )
+                    "model": "window_only",
+                },
+            )
 
     async def _capture_screen(self, region: dict | None = None) -> bytes | None:
-        """Capture screen as raw bytes."""
+        """Capture screen as raw bytes with fast downsampling."""
         try:
-            import asyncio
-            import io
             from PIL import Image
             from woody.tools.builtin.desktop_tools import _grab_screen_image
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _snap() -> bytes:
                 img = _grab_screen_image(region)
-                # Resize to max 1280px wide for vision model efficiency
-                if img.width > 1280:
-                    ratio = 1280 / img.width
-                    img = img.resize((1280, int(img.height * ratio)), Image.LANCZOS)
+                if img.width > 960:
+                    ratio = 960 / img.width
+                    img = img.resize((960, int(img.height * ratio)), Image.BILINEAR)
                 buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=85)
+                img.save(buf, format="JPEG", quality=75)
                 return buf.getvalue()
 
             return await loop.run_in_executor(None, _snap)
@@ -169,13 +213,32 @@ class VisionAgent(BaseAgent):
             log.error("vision.capture_error", error=str(e))
             return None
 
-    async def _ocr_fallback(self, image_bytes: bytes) -> str:
-        """Run OCR on image bytes as a fallback when VLM is unavailable."""
+    async def _ocr_fallback_fast(self, image_bytes: bytes) -> str:
+        """Run lightweight OCR with speed optimization."""
         from PIL import Image
-        import io
-        img = Image.open(io.BytesIO(image_bytes))
-        from woody.perception.ocr import OCREngine
-        ocr = OCREngine()
-        ocr.load()
-        result = ocr.read_image(img)
-        return result.text
+        loop = asyncio.get_running_loop()
+
+        def _do_ocr() -> str:
+            try:
+                # 1. Try pytesseract first if installed (much faster on CPU than EasyOCR)
+                import pytesseract
+                img = Image.open(io.BytesIO(image_bytes))
+                return pytesseract.image_to_string(img)[:800]
+            except Exception:
+                pass
+
+            # 2. EasyOCR with downscaled image
+            try:
+                from woody.perception.ocr import OCREngine
+                img = Image.open(io.BytesIO(image_bytes))
+                if img.width > 640:
+                    ratio = 640 / img.width
+                    img = img.resize((640, int(img.height * ratio)), Image.BILINEAR)
+                ocr = OCREngine()
+                ocr.load()
+                res = ocr.read_image(img)
+                return res.text[:800]
+            except Exception:
+                return ""
+
+        return await loop.run_in_executor(None, _do_ocr)

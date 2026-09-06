@@ -29,6 +29,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from woody.utils.llm_factory import get_backend_port, get_provider_name
 from woody.utils.logging import get_logger
+from woody.utils.paths import get_renderer_dir
 
 log = get_logger(__name__)
 
@@ -46,7 +47,7 @@ app.add_middleware(
 
 # ── Static renderer ───────────────────────────────────────────────────────────
 
-RENDERER_DIR = Path(__file__).parent.parent / "ui" / "renderer"
+RENDERER_DIR = get_renderer_dir()
 
 if RENDERER_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(RENDERER_DIR)), name="static")

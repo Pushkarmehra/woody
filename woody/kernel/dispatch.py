@@ -19,6 +19,7 @@ from woody.agents.system_agent import SystemAgent
 from woody.agents.browser_agent import BrowserAgent
 from woody.agents.react_agent import ReActAgent
 from woody.agents.chat_agent import ChatAgent
+from woody.agents.memory_agent import MemoryAgent
 from woody.critic.critic import Critic
 from woody.planner.working_memory import (
     SubTask,
@@ -173,6 +174,8 @@ def build_dispatch_bus(
     ollama_client: Any = None,
     confirm_callback: Any | None = None,
     critic: Critic | None = None,
+    semantic_memory: Any | None = None,
+    episodic_memory: Any | None = None,
 ) -> DispatchBus:
     """Factory function to build the DispatchBus with all configured agents."""
     client = llm_client or ollama_client
@@ -208,6 +211,13 @@ def build_dispatch_bus(
     agents["chat_agent"] = ChatAgent(
         llm_client=client,
         model=config.models.planner,
+        confirm_callback=confirm_callback,
+    )
+
+    # Always register MemoryAgent for persistent storage and recall
+    agents["memory_agent"] = MemoryAgent(
+        semantic_memory=semantic_memory,
+        episodic_memory=episodic_memory,
         confirm_callback=confirm_callback,
     )
 
