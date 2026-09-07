@@ -3,37 +3,43 @@
 # 🌟 Woody v4.0 — The Futuristic Windows AI Operating System Layer
 
 <p align="center">
-  <img src="assets/banner.jpg" alt="Woody v4.0 Windows AI Operating System Banner" width="100%" />
+  <a href="https://github.com/Pushkarmehra/woody">
+    <img src="assets/banner.jpg" alt="Woody v4.0 Windows AI Operating System Banner" width="100%" />
+  </a>
 </p>
 
 ### *Perceive. Reason. Act. Remember. Stay invisible until summoned.*
 
-**Woody v4.0** is an autonomous, local-first Windows AI Operating System layer designed to transform your desktop experience. Engineered with persistent multimodal memory, ultra-fast screen perception, sub-second neural voice streaming, multi-agent swarm intelligence, universal browser & site-targeted deep search, fluid liquid glass HUDs, and an authentic animated AI desktop companion powered by the **VPet Simulation Engine**.
+**Woody v4.0** is an autonomous, local-first Windows AI Operating System layer designed to transform your desktop into an intelligent, responsive workspace. Engineered with persistent multimodal memory, sub-second screen perception, neural voice streaming, multi-agent swarm intelligence, universal browser automation across 30+ platforms, liquid glass HUDs, and an authentic animated AI desktop pet powered by the **VPet Simulation Engine**.
 
 <br/>
 
-[![Version: 4.0](https://img.shields.io/badge/Version-v4.0_Release-8B5CF6?style=for-the-badge)](README.md)
+[![Version: 4.0](https://img.shields.io/badge/Version-v4.0_Release-8B5CF6?style=for-the-badge&logo=rocket&logoColor=white)](README.md)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Platform: Windows 11/10](https://img.shields.io/badge/Platform-Windows_11%20%7C%2010-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://microsoft.com/windows)
 [![Google Gemini API](https://img.shields.io/badge/Google_Gemini-API_Supported-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://aistudio.google.com/)
-[![Groq Cloud](https://img.shields.io/badge/Groq_Cloud-Ultra_Fast_LLM-F55036?style=for-the-badge)](https://groq.com)
+[![Groq Cloud](https://img.shields.io/badge/Groq_Cloud-Ultra_Fast_LLM-F55036?style=for-the-badge&logo=fastapi&logoColor=white)](https://groq.com)
 [![VPet Simulation Engine](https://img.shields.io/badge/VPet_Engine-6%2C180%2B_Frames-9333EA?style=for-the-badge)](vpet/)
 [![Inworld AI Voice](https://img.shields.io/badge/Neural_Voice-Inworld_AI_TTS-7C3AED?style=for-the-badge)](https://inworld.ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-10B981?style=for-the-badge)](LICENSE)
+
+<br/>
+
+[✨ Features](#-core-capabilities--highlights) • [🐾 Desktop Pet](#-meet-woody--your-ai-desktop-pet-companion) • [🔮 Command Center](#-liquid-obsidian-glass-command-center---web-ui) • [🏗️ Architecture](#-multi-agent-swarm-architecture) • [🚀 Quick Start](#-quick-start-guide) • [🎤 Usage Examples](#-natural-language-usage-matrix) • [🔒 Security](#-security-safety--privacy)
 
 </div>
 
 ---
 
-## ⚡ What's New in Woody v4.0: Highlights at a Glance
+## ⚡ Core Capabilities & Highlights
 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>🧠 Persistent Memory Subsystem</h3>
+      <h3>🧠 Persistent Memory Core</h3>
       <ul>
-        <li><b>Semantic Facts &amp; Profile:</b> Persistently remembers your name, preferences, project details, and key-value facts (<i>"remember that my name is Pushkar"</i>).</li>
-        <li><b>Timestamped Notes &amp; Reminders:</b> Stores and retrieves timestamped notes (<i>"store this note: buy groceries tomorrow"</i>, <i>"what are my notes?"</i>).</li>
+        <li><b>Semantic Facts &amp; Profile:</b> Persistently remembers your name, preferences, project details, and key-value facts across sessions (<i>"remember that my name is Pushkar"</i>).</li>
+        <li><b>Timestamped Notes &amp; Reminders:</b> Stores, queries, and manages timestamped notes (<i>"store this note: buy groceries tomorrow"</i>, <i>"what are my notes?"</i>).</li>
         <li><b>Searchable Episodic History:</b> Full-text keyword search across past session tasks, commands, and outputs (<i>"what did I ask earlier?"</i>).</li>
         <li><b>Sub-10ms Memory Recall:</b> Dedicated <code>MemoryAgent</code> for instant, zero-latency fact recall, note management, and prompt context injection.</li>
       </ul>
@@ -52,7 +58,7 @@
     <td width="50%" valign="top">
       <h3>⚡ Rapid Desktop Perception &amp; Vision</h3>
       <ul>
-        <li><b>Sub-Second Screen Analysis:</b> Replaced slow full-screen CPU OCR bottlenecks with Win32 UI Automation tree context extraction (&lt;5ms).</li>
+        <li><b>Sub-Second Screen Analysis:</b> Replaced slow full-screen CPU OCR bottlenecks with direct Win32 UI Automation tree context extraction (&lt;5ms).</li>
         <li><b>Zero-Lag Fallback Pipeline:</b> Downsampled visual grounding combined with high-speed Groq and Google Gemini synthesis.</li>
         <li><b>Window Disambiguation:</b> Real-time active window title, control hierarchy, and multi-monitor display inspection.</li>
         <li><b>False-Positive Launch Prevention:</b> Strict executable and registry verification prevents false-positive app status reports.</li>
@@ -78,7 +84,7 @@
 Woody is not just a hidden background daemon; it features an authentic, fully animated **AI Desktop Pet** that lives directly on your Windows desktop. Talk to Woody via voice, have it inspect your active applications, automate tedious workflows, feed it snacks, or let it work jobs to earn money!
 
 <p align="center">
-  <img src="assets/desktop_pet.jpg" alt="Woody AI Desktop Pet Showcase" width="95%" />
+  <img src="assets/desktop_pet.jpg" alt="Woody AI Desktop Pet Companion Showcase" width="95%" />
 </p>
 
 ### 🎬 Animated Pet Sprite States
@@ -92,11 +98,11 @@ Woody is not just a hidden background daemon; it features an authentic, fully an
 
 </div>
 
-### ✨ VPet Simulation Features:
+### ✨ VPet Simulation Engine Features:
 - **6,180+ Official Animation Frames:** Direct integration of the official LorisYounger/VPet core sprite graph across 25+ unique interactive animations.
 - **5-Tab Floating Royal Purple Toolbar (`prupe.lps`):**
   - 🍲 **Feed:** Feed foods, drinks, snacks, and medicine to restore fullness and health.
-  - 📊 **Status:** View Level, EXP, Health, Stamina, Mood, Hunger, Thirst, and Likability.
+  - 📊 **Status:** View Level, EXP, Health, Stamina, Mood, Hunger, Thirst, and Likability in real-time.
   - 🎭 **Interact:** Play tennis, blow bubbles, touch head/body, pinch cheeks, or make it dance.
   - 🏪 **Shop:** Purchase from 120+ translated catalog items using earned coins ($).
   - 💼 **Work:** Start real-time Work & Study jobs (AI Coding, Streaming, Math, Analytics) with floating purple countdown timers.
@@ -140,6 +146,10 @@ woody
 ---
 
 ## 🏗️ Multi-Agent Swarm Architecture
+
+<p align="center">
+  <img src="assets/architecture.jpg" alt="Woody v4.0 Multi-Agent Architecture Graphic" width="95%" />
+</p>
 
 ```
                   ┌─────────────────────────────────────────┐
@@ -224,8 +234,8 @@ woody
 
 ```powershell
 # Clone the repository
-git clone https://github.com/Pushkarmehra/Wodi.git
-cd Wodi
+git clone https://github.com/Pushkarmehra/woody.git
+cd woody
 
 # Run automated Windows setup script (installs venv & all dependencies)
 .\scripts\install.ps1
@@ -284,21 +294,21 @@ python -m woody --web-ui
 
 ---
 
-## 🎤 Natural Language Usage Examples
+## 🎤 Natural Language Usage Matrix
 
 | Domain | Voice / Text Prompt | Agent Executing |
 |---|---|---|
-| **Memory & Profile** | *"Remember that my name is Pushkar"* / *"Who am I?"* | Memory Agent (`remember_fact`, `recall`) |
-| **Notes & Reminders** | *"Store this note: buy groceries tomorrow"* / *"What are my notes?"* | Memory Agent (`save_note`, `recall`) |
-| **History & Context** | *"What did I ask earlier?"* / *"Search history for python"* | Memory Agent (`search_history`) |
-| **Site & Browser Search** | *"Open YouTube on Edge and search there MrBeast"* | Browser Agent (`search_site` on Edge) |
-| **Direct Site Search** | *"Search iPhone 16 on Amazon"* / *"Play Believer on Spotify"* | Browser Agent (Site Deep-Search) |
-| **Compound Multi-App** | *"Open Notepad, Calculator, and Edge"* | Desktop Agent (Multi-App Decomposer) |
-| **Desktop Automation** | *"Open Notepad, type my project notes, and save it to Desktop"* | Desktop Agent (Win32 Automation) |
-| **Multimodal Vision** | *"Look at my screen and summarize this open document"* | Vision Agent (Fast UI Tree + Groq/Gemini) |
-| **System Diagnostics** | *"What processes are taking up the most RAM right now?"* | System Agent (psutil / WMI) |
-| **Pet & Life Sim** | *"Woody, start working on Python AI Coding"* / Feed food 🍲 / Pet head 💖 | VPet Engine & Graph State Machine |
-| **Code Generation** | *"Write a Python script to convert all PNGs to WebP in this folder"* | Coding Agent (Sandbox REPL) |
+| **Memory & Facts** | *"Remember that my name is Pushkar"* / *"Who am I?"* | `memory_agent.remember_fact` |
+| **Notes & Reminders** | *"Store this note: buy groceries tomorrow"* / *"What are my notes?"* | `memory_agent.save_note` |
+| **Episodic History** | *"What did I ask earlier?"* / *"Search history for python"* | `memory_agent.search_history` |
+| **Site & Browser Search** | *"Open YouTube on Edge and search there MrBeast"* | `browser_agent.search_site` (Edge) |
+| **Direct Deep Search** | *"Search iPhone 16 on Amazon"* / *"Play Believer on Spotify"* | `browser_agent.search_site` |
+| **Compound Multi-App** | *"Open Notepad, Calculator, and Edge"* | `desktop_agent.open_app` (Multi) |
+| **Desktop Automation** | *"Open Notepad, type my project notes, and save it to Desktop"* | `desktop_agent` (Win32 API) |
+| **Multimodal Vision** | *"Look at my screen and summarize this open document"* | `vision_agent` (UI Tree + OCR) |
+| **System Diagnostics** | *"What processes are taking up the most RAM right now?"* | `system_agent.list_processes` |
+| **Pet & Life Sim** | *"Woody, start working on Python AI Coding"* / Feed food 🍲 / Pet head 💖 | `vpet_engine` & Graph State Machine |
+| **Code Generation** | *"Write a Python script to convert all PNGs to WebP in this folder"* | `coding_agent` (Sandbox REPL) |
 
 ---
 
@@ -352,15 +362,16 @@ agents:
 ## 📂 Project Directory Structure
 
 ```
-Wodi/
-├── assets/                  # Banners, interface mockups, showcase imagery
+woody/
+├── assets/                  # High-res banners, interface mockups, showcase imagery
 │   ├── banner.jpg           # Hero banner (Woody v4.0)
 │   ├── command_center.jpg   # Obsidian glass command center HUD
-│   └── desktop_pet.jpg      # VPet desktop companion showcase
+│   ├── desktop_pet.jpg      # VPet desktop companion showcase
+│   └── architecture.jpg     # Multi-Agent Swarm architecture infographic
 ├── config/                  # Default configurations (woody_config.yaml)
 ├── gifs/                    # Sprite fallback animation loops
 ├── scripts/                 # Automated setup & utility scripts (install.ps1)
-├── tests/                   # Comprehensive pytest test suite
+├── tests/                   # Comprehensive pytest test suite (57+ unit & integration tests)
 ├── vpet/                    # Authentic VPet-Simulator Core assets & LPS files
 │   └── VPet-main/           # 6,180+ frames, animations, item LPS, English dicts
 └── woody/                   # Core Python package
@@ -386,7 +397,7 @@ Wodi/
 ## 🔒 Security, Safety & Privacy
 
 - **Local-First Privacy:** Sensitive data, screenshots, and audio can execute entirely on your local hardware.
-- **Permission Tiers:** High-impact actions (file deletion, registry edits, system shutdown) require inline interactive user confirmation.
+- **Permission Tiers:** High-impact actions (file deletion, registry edits, system shutdown) require inline interactive user confirmation cards.
 - **Prompt Injection Defense:** Screen OCR and clipboard inputs are treated as **untrusted data**, never direct instruction prompts.
 - **Audit Logging:** Every planner step, tool execution, and agent response is logged to a local SQLite database for full transparency.
 
