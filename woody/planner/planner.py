@@ -613,6 +613,180 @@ class Planner:
                 "params": {"query": query, "n": 5},
             }
 
+    def _parse_calendar_and_reminder_commands(self, request: str) -> dict | None:
+        """
+        Parse calendar scheduling and reminder commands:
+          1. "remind me to <task> in 10 minutes / at 5pm / tomorrow"
+          2. "remind me in 10 minutes to <task>"
+          3. "remember to <task> [at/in/on <time>]"
+          4. "set a reminder to/for <task> [at/in/on <time>]"
+          5. "add <event> to my calendar [tomorrow at 3pm]"
+          6. "schedule a meeting with <who> [on Friday at 4pm]"
+          7. "what are my reminders" / "list reminders"
+          8. "what's on my calendar" / "list calendar events"
+          9. "delete reminder <target>" / "delete calendar event <target>"
+        """
+        req = self._clean_req(request).strip()
+        req_lower = req.lower().strip("?!., \t")
+
+        # 1. Listing reminders
+        if any(req_lower == k or req_lower.startswith(k + " ") for k in [
+            "what are my reminders", "what are the reminders", "show my reminders", "show reminders",
+            "list my reminders", "list reminders", "do i have any reminders", "check my reminders",
+            "get my reminders", "get reminders", "my reminders"
+        ]):
+            return {
+                "agent": "system_agent",
+                "confidence": 1.0,
+                "direct_action": "list_reminders",
+                "params": {"status": "pending"},
+            }
+
+        # 2. Listing calendar events
+        if any(req_lower == k or req_lower.startswith(k + " ") for k in [
+            "what is on my calendar", "what's on my calendar", "whats on my calendar",
+            "show my calendar", "show calendar", "list calendar", "list my calendar",
+            "what are my events", "show my events", "list events", "check my calendar",
+            "what do i have scheduled", "what is scheduled", "my calendar", "my schedule"
+        ]):
+            return {
+                "agent": "system_agent",
+                "confidence": 1.0,
+                "direct_action": "list_calendar_events",
+                "params": {"date": ""},
+            }
+
+        # 3. Deleting reminders
+        del_rem_m = re.match(r'^(?:delete|remove|cancel|clear)\s+(?:the\s+|my\s+)?reminder(?:\s+for|\s+to|\s+called|\s*:|\s+)?\s*(.+)$', req, re.IGNORECASE)
+        if del_rem_m:
+            target = del_rem_m.group(1).strip().strip("'\"")
+            return {
+                "agent": "system_agent",
+                "confidence": 1.0,
+                "direct_action": "delete_reminder",
+                "params": {"target": target},
+            }
+
+        # 4. Deleting calendar events
+        del_cal_m = re.match(r'^(?:delete|remove|cancel|clear)\s+(?:the\s+|my\s+)?(?:calendar\s+event|event|calendar\s+entry)(?:\s+for|\s+to|\s+called|\s*:|\s+)?\s*(.+)$', req, re.IGNORECASE)
+        if del_cal_m:
+            target = del_cal_m.group(1).strip().strip("'\"")
+            return {
+                "agent": "system_agent",
+                "confidence": 1.0,
+                "direct_action": "delete_calendar_event",
+                "params": {"target": target},
+            }
+
+        # 5. Setting Reminders
+        # Pattern: "remind me in/at <time> to <task>"
+        m_rem_time_first = re.match(
+            r'^(?:remind\s+me|set\s+a\s+reminder|set\s+reminder)\s+(?:in|at|on)\s+(.+?)\s+to\s+(.+)$',
+            req,
+            re.IGNORECASE,
+        )
+        if m_rem_time_first:
+            time_part = m_rem_time_first.group(1).strip()
+            task_part = m_rem_time_first.group(2).strip()
+            return {
+                "agent": "system_agent",
+                "confidence": 1.0,
+                "direct_action": "set_reminder",
+                "params": {"text": task_part, "time_str": time_part, "date_str": time_part},
+            }
+
+        # Pattern: "remind me to <task> [at/in/on <time>]" or "remember to <task> [at/in/on <time>]"
+        m_rem_task = re.match(
+            r'^(?:remind\s+me\s+to|remind\s+me|remember\s+to|set\s+(?:a\s+)?reminder\s+(?:to|for))\s+(.+)$',
+            req,
+            re.IGNORECASE,
+        )
+        if m_rem_task:
+            body = m_rem_task.group(1).strip()
+            time_m = re.search(r'\s+(?:in\s+\d+|at\s+\d+|on\s+\w+|for\s+\w+|tomorrow|tonight|today|next\s+\w+).*$', body, re.IGNORECASE)
+            time_str = ""
+            text_str = body
+            if time_m:
+                time_str = time_m.group(0).strip()
+                text_str = body[:time_m.start()].strip()
+            return {
+                "agent": "system_agent",
+                "confidence": 1.0,
+                "direct_action": "set_reminder",
+                "params": {"text": text_str, "time_str": time_str, "date_str": time_str},
+            }
+
+        # 6. Calendar Events
+        cal_add_m1 = re.match(r'^(?:add|put)\s+(.+?)\s+(?:to|on|in)\s+(?:my\s+)?calendar(?:\s+(.+))?$', req, re.IGNORECASE)
+        if cal_add_m1:
+            title = cal_add_m1.group(1).strip()
+            time_part = (cal_add_m1.group(2) or "").strip()
+            return {
+                "agent": "system_agent",
+                "confidence": 1.0,
+                "direct_action": "add_calendar_event",
+                "params": {"title": title, "time_str": time_part, "date_str": time_part},
+            }
+
+        cal_add_m2 = re.match(r'^(?:add\s+to\s+(?:my\s+)?calendar(?:\s*:|\s+)|schedule\s+(?:a\s+)?(?:meeting|event|task|call)?(?:\s*:|\s+)|create\s+(?:a\s+)?calendar\s+event(?:\s*:|\s+))\s*(.+)$', req, re.IGNORECASE)
+        if cal_add_m2:
+            body = cal_add_m2.group(1).strip()
+            time_m = re.search(r'\s+(?:in\s+\d+|at\s+\d+|on\s+\w+|for\s+\w+|tomorrow|tonight|today|next\s+\w+).*$', body, re.IGNORECASE)
+            time_str = ""
+            title_str = body
+            if time_m:
+                time_str = time_m.group(0).strip()
+                title_str = body[:time_m.start()].strip()
+            return {
+                "agent": "system_agent",
+                "confidence": 1.0,
+                "direct_action": "add_calendar_event",
+                "params": {"title": title_str, "time_str": time_str, "date_str": time_str},
+            }
+
+        return None
+
+    def _parse_fix_text_commands(self, request: str) -> dict | None:
+        """
+        Parse 'fix my text on screen', grammar correction, and text proofreading commands.
+        """
+        req = self._clean_req(request).strip()
+        req_lower = req.lower().strip("?!., \t")
+
+        fix_phrases = [
+            "fix my text on screen", "fix my text", "fix this text", "fix the text on screen",
+            "fix the text on my screen", "fix text on screen", "fix text",
+            "correct my text on screen", "correct my text", "correct this text", "correct text",
+            "fix my grammar", "fix grammar", "correct my grammar", "correct grammar",
+            "fix my spelling", "fix spelling", "check my spelling", "check spelling",
+            "rewrite this professionally", "rewrite professionally", "make this professional",
+            "proofread my text", "proofread this", "proofread text", "proofread screen",
+            "fix whatever is on my screen", "fix screen text", "improve this text",
+        ]
+
+        for p in fix_phrases:
+            if req_lower == p or req_lower.startswith(p + " ") or req_lower.startswith(p + ":"):
+                mode = "professional" if "professional" in req_lower else ("concise" if "concise" in req_lower else "fix")
+                colon_idx = req.find(":")
+                direct_text = req[colon_idx + 1:].strip() if colon_idx != -1 and len(req[colon_idx + 1:].strip()) > 0 else ""
+                return {
+                    "agent": "desktop_agent",
+                    "confidence": 1.0,
+                    "direct_action": "fix_text_on_screen",
+                    "params": {"custom_instruction": "Fix grammar and improve phrasing", "mode": mode, "text": direct_text},
+                }
+
+        m = re.match(r'^(?:fix\s+(?:my\s+|the\s+)?text|correct\s+(?:my\s+|the\s+)?text|rewrite|proofread)(?:\s*:\s*|\s+that\s+|\s+)(.+)$', req, re.IGNORECASE)
+        if m:
+            direct_text = m.group(1).strip()
+            mode = "professional" if "professional" in req_lower else "fix"
+            return {
+                "agent": "desktop_agent",
+                "confidence": 1.0,
+                "direct_action": "fix_text_on_screen",
+                "params": {"custom_instruction": "Fix grammar and improve phrasing", "mode": mode, "text": direct_text},
+            }
+
         return None
 
     # ── Intent Routing ────────────────────────────────────────────────────────
@@ -622,22 +796,32 @@ class Planner:
         req = user_request.lower().strip()
         effective_req = self._clean_req(req)
 
-        # 1. Direct Memory Commands (e.g. 'remember that my name is Pushkar', 'what is my name?')
+        # 1. Calendar & Reminder Commands (e.g. 'remind me to...', 'add meeting to calendar...')
+        cal_rem_cmd = self._parse_calendar_and_reminder_commands(user_request)
+        if cal_rem_cmd:
+            return cal_rem_cmd
+
+        # 2. Fix Text on Screen Commands (e.g. 'fix my text', 'fix grammar', 'rewrite professionally')
+        fix_text_cmd = self._parse_fix_text_commands(user_request)
+        if fix_text_cmd:
+            return fix_text_cmd
+
+        # 3. Direct Memory Commands (e.g. 'remember that my name is Pushkar', 'what is my name?')
         mem_cmd = self._parse_memory_commands(user_request)
         if mem_cmd:
             return mem_cmd
 
-        # 2. Compound Browser & Site Commands (e.g. 'open edge and search iphone on youtube')
+        # 4. Compound Browser & Site Commands (e.g. 'open edge and search iphone on youtube')
         browser_cmd = self._parse_browser_and_site_commands(user_request)
         if browser_cmd:
             return browser_cmd
 
-        # 2. Compound Open + Type (e.g. 'open notebook and write hello')
+        # 5. Compound Open + Type (e.g. 'open notebook and write hello')
         compound_type = self._parse_compound_open_and_type(user_request)
         if compound_type:
             return {"agent": "compound_open_type", "confidence": 1.0, "params": compound_type}
 
-        # 3. Compound Multi-App Launch (e.g. 'open notepad and calculator')
+        # 6. Compound Multi-App Launch (e.g. 'open notepad and calculator')
         multi_app = self._parse_compound_multi_app(user_request)
         if multi_app:
             return {"agent": "compound_multi_app", "confidence": 1.0, "params": {"apps": multi_app}}
@@ -910,6 +1094,38 @@ class Planner:
         elif action in ("recall", "forget", "search_history"):
             params["query"] = request.strip()
             params["target"] = request.strip()
+
+        elif action == "add_calendar_event":
+            parsed = self._parse_calendar_and_reminder_commands(request)
+            if parsed and parsed.get("params"):
+                return parsed["params"]
+            params["title"] = request.strip()
+
+        elif action == "set_reminder":
+            parsed = self._parse_calendar_and_reminder_commands(request)
+            if parsed and parsed.get("params"):
+                return parsed["params"]
+            params["text"] = request.strip()
+
+        elif action == "list_calendar_events":
+            params["date"] = ""
+
+        elif action == "list_reminders":
+            params["status"] = "pending"
+
+        elif action in ("delete_reminder", "delete_calendar_event"):
+            parsed = self._parse_calendar_and_reminder_commands(request)
+            if parsed and parsed.get("params"):
+                return parsed["params"]
+            params["target"] = request.strip()
+
+        elif action in ("fix_text_on_screen", "fix_text"):
+            parsed = self._parse_fix_text_commands(request)
+            if parsed and parsed.get("params"):
+                return parsed["params"]
+            params["custom_instruction"] = "Fix grammar and improve phrasing"
+            params["mode"] = "fix"
+            params["text"] = request.strip()
 
         elif action == "chat":
             params["message"] = request.strip()

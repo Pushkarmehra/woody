@@ -627,6 +627,21 @@ class WoodyKernel:
                         lines.append(f"• [{s.get('time', '')[:16]}] '{s.get('request', '')}' → {s.get('result', '')[:60]}")
                     return "\n".join(lines)
 
+                elif action == "add_calendar_event":
+                    msg = res.get("message")
+                    if msg:
+                        return msg
+                    return f"Added '{res.get('event', {}).get('title', 'event')}' to your calendar."
+                elif action == "set_reminder":
+                    msg = res.get("message")
+                    if msg:
+                        return msg
+                    return f"Reminder set for {res.get('formatted_time', 'scheduled time')}."
+                elif action in ("list_calendar_events", "list_reminders", "delete_reminder", "delete_calendar_event"):
+                    return res.get("message", "Calendar operation completed.")
+                elif action in ("fix_text_on_screen", "fix_text"):
+                    return res.get("message", "Fixed text on screen.")
+
                 elif action in ("analyze_screen", "describe_window", "read_screen_text", "explain_error"):
                     analysis = res.get("analysis")
                     if analysis:

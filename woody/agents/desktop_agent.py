@@ -58,6 +58,8 @@ class DesktopAgent(BaseAgent):
         "compose_email",
         "get_user_profile",
         "set_user_profile",
+        "fix_text_on_screen",
+        "fix_text",
     }
 
     def __init__(self, confirm_callback: Any | None = None) -> None:
@@ -89,6 +91,8 @@ class DesktopAgent(BaseAgent):
             "compose_email": self._compose_email,
             "get_user_profile": self._get_user_profile,
             "set_user_profile": self._set_user_profile,
+            "fix_text_on_screen": self._fix_text_on_screen,
+            "fix_text": self._fix_text_on_screen,
         }
         handler = handlers.get(action)
         if not handler:
@@ -357,6 +361,14 @@ class DesktopAgent(BaseAgent):
         preferred_email_app = params.get("preferred_email_app", "")
         res = set_user_profile(name=name, tone=tone, preferred_email_app=preferred_email_app)
         return AgentResult(success=res.get("success", False), output=res.get("message", "Profile updated"))
+
+    async def _fix_text_on_screen(self, params: dict, context: dict) -> AgentResult:
+        from woody.tools.builtin.desktop_tools import fix_text_on_screen
+        custom_instruction = params.get("custom_instruction", "Fix grammar and spelling")
+        mode = params.get("mode", "fix")
+        input_text = params.get("text", "") or params.get("input_text", "")
+        res = fix_text_on_screen(custom_instruction=custom_instruction, mode=mode, input_text=input_text)
+        return AgentResult(success=res.get("success", False), output=res, error=res.get("error"))
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

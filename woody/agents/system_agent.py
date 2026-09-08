@@ -29,6 +29,12 @@ class SystemAgent(BaseAgent):
         "clarify",
         "chat",
         "stop_speaking",
+        "add_calendar_event",
+        "set_reminder",
+        "list_calendar_events",
+        "list_reminders",
+        "delete_reminder",
+        "delete_calendar_event",
     }
 
     def __init__(self, confirm_callback: Any | None = None) -> None:
@@ -47,6 +53,12 @@ class SystemAgent(BaseAgent):
             "clarify": self._clarify,
             "chat": self._chat,
             "stop_speaking": self._stop_speaking,
+            "add_calendar_event": self._add_calendar_event,
+            "set_reminder": self._set_reminder,
+            "list_calendar_events": self._list_calendar_events,
+            "list_reminders": self._list_reminders,
+            "delete_reminder": self._delete_reminder,
+            "delete_calendar_event": self._delete_calendar_event,
         }
         handler = handlers.get(action)
         if not handler:
@@ -165,4 +177,44 @@ class SystemAgent(BaseAgent):
         except Exception:
             pass
         return AgentResult(success=True, output={"status": "stopped", "message": "Speech stopped."})
+
+    async def _add_calendar_event(self, params: dict, context: dict) -> AgentResult:
+        from woody.tools.builtin.calendar_tools import add_calendar_event
+        title = params.get("title", "") or context.get("user_request", "Meeting")
+        date_str = params.get("date", "") or params.get("date_str", "")
+        time_str = params.get("time", "") or params.get("time_str", "")
+        duration = params.get("duration", 30)
+        res = add_calendar_event(title=title, date_str=date_str, time_str=time_str, duration_minutes=duration)
+        return AgentResult(success=res.get("success", False), output=res)
+
+    async def _set_reminder(self, params: dict, context: dict) -> AgentResult:
+        from woody.tools.builtin.calendar_tools import set_reminder
+        text = params.get("text", "") or params.get("message", "") or context.get("user_request", "Reminder")
+        time_str = params.get("time", "") or params.get("time_str", "")
+        date_str = params.get("date", "") or params.get("date_str", "")
+        res = set_reminder(text=text, time_str=time_str, date_str=date_str)
+        return AgentResult(success=res.get("success", False), output=res)
+
+    async def _list_calendar_events(self, params: dict, context: dict) -> AgentResult:
+        from woody.tools.builtin.calendar_tools import list_calendar_events
+        res = list_calendar_events(date_str=params.get("date", ""))
+        return AgentResult(success=res.get("success", True), output=res)
+
+    async def _list_reminders(self, params: dict, context: dict) -> AgentResult:
+        from woody.tools.builtin.calendar_tools import list_reminders
+        res = list_reminders(status=params.get("status", "pending"))
+        return AgentResult(success=res.get("success", True), output=res)
+
+    async def _delete_reminder(self, params: dict, context: dict) -> AgentResult:
+        from woody.tools.builtin.calendar_tools import delete_reminder
+        target = params.get("target", "") or params.get("id", "")
+        res = delete_reminder(target=target)
+        return AgentResult(success=res.get("success", False), output=res, error=res.get("error"))
+
+    async def _delete_calendar_event(self, params: dict, context: dict) -> AgentResult:
+        from woody.tools.builtin.calendar_tools import delete_calendar_event
+        target = params.get("target", "") or params.get("id", "")
+        res = delete_calendar_event(target=target)
+        return AgentResult(success=res.get("success", False), output=res, error=res.get("error"))
+
 

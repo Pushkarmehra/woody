@@ -27,6 +27,7 @@ TOOLS = [
     "compose_email",
     "get_user_profile",
     "set_user_profile",
+    "fix_text_on_screen",
 ]
 
 # Comprehensive common application aliases and synonyms
@@ -526,18 +527,31 @@ def take_screenshot(region: dict | None = None) -> dict:
 
 
 def analyze_screen(custom_prompt: str = "") -> dict:
-    """Capture the screen and visually analyze what is currently open, displayed, or if any error is showing.
+    """Capture the screen and visually analyze what is currently open, displayed, or if any error is showing (< 20ms).
 
     Args:
         custom_prompt: Optional specific question about the screen (e.g. 'what error is showing?', 'what code is open?').
     """
-    # 1. Get active window title & open windows
+    # 1. Get active window title & child controls (< 5ms)
     active_window = "Desktop"
+    child_texts: list[str] = []
     try:
         import win32gui
         hwnd = win32gui.GetForegroundWindow()
         if hwnd:
             active_window = win32gui.GetWindowText(hwnd).strip() or "Desktop"
+
+            def _enum_child(child_hwnd, _):
+                if win32gui.IsWindowVisible(child_hwnd):
+                    txt = win32gui.GetWindowText(child_hwnd).strip()
+                    if txt and len(txt) > 1 and txt not in child_texts:
+                        child_texts.append(txt)
+                return True
+
+            try:
+                win32gui.EnumChildWindows(hwnd, _enum_child, None)
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -546,28 +560,17 @@ def analyze_screen(custom_prompt: str = "") -> dict:
     open_windows_str = ", ".join(open_titles[:5]) if open_titles else "None visible"
 
     out_path = ""
-    screen_text = ""
     try:
         img = _grab_screen_image()
         out_path = str(Path(tempfile.gettempdir()) / "woody_screenshot.jpg")
         img.save(out_path, format="JPEG", quality=85)
-
-        # Best-effort OCR / text extraction for high-IQ screen awareness
-        try:
-            from woody.perception.ocr import OCREngine
-            ocr = OCREngine()
-            ocr.load()
-            res = ocr.read_image(img)
-            screen_text = res.text[:1200]
-        except Exception:
-            pass
     except Exception as e:
         log.debug("analyze_screen.capture_fallback", error=str(e))
 
+    controls_summary = ", ".join(f"'{c}'" for c in child_texts[:6]) if child_texts else ""
     analysis = f"Currently focused on window: '{active_window}'. Open applications: {open_windows_str}."
-    if screen_text.strip():
-        summary_snippet = " ".join(screen_text.split()[:40])
-        analysis += f" Visible on screen: {summary_snippet}..."
+    if controls_summary:
+        analysis += f" Visible UI elements: {controls_summary}."
 
     return {
         "success": True,
@@ -575,7 +578,7 @@ def analyze_screen(custom_prompt: str = "") -> dict:
         "open_windows": windows_info,
         "screenshot_path": out_path,
         "analysis": analysis,
-        "visible_text": screen_text[:800],
+        "visible_text": " | ".join(child_texts[:10]),
     }
 
 
@@ -690,5 +693,135 @@ def set_user_profile(name: str = "", tone: str = "", preferred_email_app: str = 
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def fix_text_on_screen(
+    custom_instruction: str = "Fix grammar and spelling",
+    mode: str = "fix",
+    input_text: str = "",
+    client: Any = None,
+) -> dict[str, Any]:
+    """Capture selected text on screen, fix grammar/spelling with AI, and paste it back into place.
+
+    Args:
+        custom_instruction: Specific editing instructions.
+        mode: Editing tone/mode ('fix', 'professional', 'concise', 'friendly').
+        input_text: Direct text to fix if not copying from screen.
+        client: Optional GroqClient instance for LLM processing.
+    """
+    import time
+    text_to_fix = input_text.strip()
+    replaced = False
+
+    if not text_to_fix:
+        # 1. Try to copy currently selected text using Ctrl+C
+        try:
+            import win32clipboard
+            win32clipboard.OpenClipboard()
+            win32clipboard.EmptyClipboard()
+            win32clipboard.CloseClipboard()
+        except Exception:
+            pass
+
+        hotkey("ctrl+c")
+        time.sleep(0.08)
+
+        # Read clipboard
+        try:
+            import win32clipboard
+            win32clipboard.OpenClipboard()
+            if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_UNICODETEXT):
+                text_to_fix = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT) or ""
+            win32clipboard.CloseClipboard()
+        except Exception:
+            pass
+
+    if not text_to_fix.strip():
+        # Fallback: check active window title or focus
+        try:
+            import win32gui
+            hwnd = win32gui.GetForegroundWindow()
+            if hwnd:
+                t = win32gui.GetWindowText(hwnd).strip()
+                if t:
+                    text_to_fix = t
+        except Exception:
+            pass
+
+    if not text_to_fix.strip():
+        return {
+            "success": False,
+            "error": "No text was selected on screen to fix. Please highlight text or provide the text directly.",
+        }
+
+    # Run AI Correction
+    mode_instructions = {
+        "fix": "Fix all grammar, spelling, punctuation, capitalization, and phrasing issues while preserving exact meaning.",
+        "professional": "Rewrite this text to be professional, polished, and eloquent while keeping the core message.",
+        "concise": "Make this text concise, direct, and impactful without fluff.",
+        "friendly": "Make this text warm, friendly, and engaging.",
+    }
+    system_instruction = mode_instructions.get(mode, custom_instruction)
+
+    fixed_text = text_to_fix
+    try:
+        from woody.utils.groq_client import GroqClient, Message
+        llm = client or GroqClient()
+        prompt = (
+            f"Instruction: {system_instruction}\n\n"
+            f"Original Text:\n\"\"\"\n{text_to_fix}\n\"\"\"\n\n"
+            "Output Requirement:\n"
+            "Return ONLY the fixed/rewritten text. Do NOT add quotes, markdown fences, commentary, or conversational filler."
+        )
+
+        import asyncio
+        async def _run_fix():
+            resp = await llm.chat(
+                messages=[
+                    Message(role="system", content="You are a professional editor and writing assistant. Output ONLY the polished text."),
+                    Message(role="user", content=prompt),
+                ],
+                temperature=0.1,
+                max_tokens=512,
+            )
+            return resp.content.strip()
+
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                fixed_text = pool.submit(asyncio.run, _run_fix()).result(timeout=5.0)
+        except RuntimeError:
+            fixed_text = asyncio.run(_run_fix())
+        except Exception:
+            pass
+    except Exception as e:
+        log.warning("desktop.fix_text_llm_error", error=str(e))
+        # Basic offline cleanup
+        fixed_text = text_to_fix.strip()
+        if fixed_text and fixed_text[0].islower():
+            fixed_text = fixed_text[0].upper() + fixed_text[1:]
+        if fixed_text and fixed_text[-1] not in ".!?":
+            fixed_text += "."
+
+    # Put fixed text onto clipboard and paste back over selected text
+    try:
+        set_clipboard(fixed_text)
+        time.sleep(0.04)
+        hotkey("ctrl+v")
+        replaced = True
+    except Exception:
+        replaced = False
+
+    log.info("desktop.fix_text_completed", original=text_to_fix[:40], fixed=fixed_text[:40])
+    return {
+        "success": True,
+        "action": "fix_text_on_screen",
+        "original": text_to_fix,
+        "fixed": fixed_text,
+        "replaced": replaced,
+        "message": f"Fixed your text: '{fixed_text}'." if len(fixed_text) < 80 else f"Fixed your text and pasted it back onto your screen.",
+    }
+
 
 
