@@ -7,7 +7,7 @@ import inspect
 import threading
 from typing import Any, Callable
 
-from woody.tools.builtin import browser_tools, desktop_tools, filesystem_tools, system_tools
+from woody.tools.builtin import browser_tools, calendar_tools, desktop_tools, filesystem_tools, system_tools
 from woody.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -18,6 +18,7 @@ BUILTIN_MODULES = [
     system_tools,
     filesystem_tools,
     browser_tools,
+    calendar_tools,
 ]
 
 _TOOL_MAP: dict[str, Callable] = {}

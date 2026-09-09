@@ -320,6 +320,12 @@ async def _langgraph_stream(prompt: str) -> AsyncGenerator[dict, None]:
         sentence_queue = asyncio.Queue()
         asyncio.create_task(tts.speak_sentence_stream(sentence_queue))
 
+    inputs = {
+        "messages": context,
+        "current_agent": "Planner",
+        "status": "Thinking...",
+    }
+
     try:
         async for event in graph.astream(
             inputs,

@@ -641,6 +641,10 @@ class WoodyKernel:
                     return res.get("message", "Calendar operation completed.")
                 elif action in ("fix_text_on_screen", "fix_text"):
                     return res.get("message", "Fixed text on screen.")
+                elif action == "open_memory_window":
+                    return "Opened your Memory Window. You can see active tasks, dialogue turns, and stored memories."
+                elif action == "get_previous_task":
+                    return res.get("summary", "No previous task found in active memory.")
 
                 elif action in ("analyze_screen", "describe_window", "read_screen_text", "explain_error"):
                     analysis = res.get("analysis")

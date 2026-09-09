@@ -128,12 +128,15 @@ async def test_planner_routing_calendar_and_reminders():
     assert state4["subtasks"][0]["agent"] == "system_agent"
     assert state4["subtasks"][0]["action"] == "list_calendar_events"
 
-    # 5. Show reminders
-    q5 = "what are my reminders"
-    state5 = await planner.plan(q5)
-    assert len(state5["subtasks"]) == 1
-    assert state5["subtasks"][0]["agent"] == "system_agent"
-    assert state5["subtasks"][0]["action"] == "list_reminders"
+    # 6. User's exact prompt: 'add a reminder in my calander of 15 sep about my birthday in google calender'
+    q6 = "add a reminder in my calander of 15 sep about my birthday in google calender"
+    state6 = await planner.plan(q6)
+    assert len(state6["subtasks"]) == 1
+    assert state6["subtasks"][0]["agent"] == "system_agent"
+    assert state6["subtasks"][0]["action"] == "add_calendar_event"
+    assert state6["subtasks"][0]["params"]["title"] == "Birthday"
+    assert "15 sep" in state6["subtasks"][0]["params"]["date_str"]
+    assert state6["subtasks"][0]["params"].get("open_google_calendar") is True
 
 
 @pytest.mark.asyncio

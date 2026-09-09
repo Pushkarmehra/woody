@@ -35,6 +35,8 @@ class SystemAgent(BaseAgent):
         "list_reminders",
         "delete_reminder",
         "delete_calendar_event",
+        "open_memory_window",
+        "get_previous_task",
     }
 
     def __init__(self, confirm_callback: Any | None = None) -> None:
@@ -59,6 +61,8 @@ class SystemAgent(BaseAgent):
             "list_reminders": self._list_reminders,
             "delete_reminder": self._delete_reminder,
             "delete_calendar_event": self._delete_calendar_event,
+            "open_memory_window": self._open_memory_window,
+            "get_previous_task": self._get_previous_task,
         }
         handler = handlers.get(action)
         if not handler:
@@ -184,7 +188,15 @@ class SystemAgent(BaseAgent):
         date_str = params.get("date", "") or params.get("date_str", "")
         time_str = params.get("time", "") or params.get("time_str", "")
         duration = params.get("duration", 30)
-        res = add_calendar_event(title=title, date_str=date_str, time_str=time_str, duration_minutes=duration)
+        open_google_calendar = bool(params.get("open_google_calendar", False))
+        res = add_calendar_event(
+            title=title,
+            date_str=date_str,
+            time_str=time_str,
+            duration_minutes=duration,
+            open_google_calendar=open_google_calendar,
+            open_app=False,
+        )
         return AgentResult(success=res.get("success", False), output=res)
 
     async def _set_reminder(self, params: dict, context: dict) -> AgentResult:
@@ -216,5 +228,23 @@ class SystemAgent(BaseAgent):
         target = params.get("target", "") or params.get("id", "")
         res = delete_calendar_event(target=target)
         return AgentResult(success=res.get("success", False), output=res, error=res.get("error"))
+
+    async def _open_memory_window(self, params: dict, context: dict) -> AgentResult:
+        import subprocess
+        import sys
+        from pathlib import Path
+        try:
+            script_path = str(Path(__file__).parent.parent / "ui" / "memory_window.py")
+            subprocess.Popen(
+                [sys.executable, script_path],
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if sys.platform == "win32" else 0,
+            )
+            return AgentResult(success=True, output={"status": "opened", "message": "Memory Window opened."})
+        except Exception as e:
+            return AgentResult(success=False, output={"error": str(e)}, error=str(e))
+
+    async def _get_previous_task(self, params: dict, context: dict) -> AgentResult:
+        summary = params.get("summary", "No previous task found in active memory.")
+        return AgentResult(success=True, output={"summary": summary, "last_task": params.get("last_task")})
 
 

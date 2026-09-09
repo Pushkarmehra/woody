@@ -24,6 +24,15 @@ log = get_logger(__name__)
 CALENDAR_FILE = Path("~/.Woody/calendar_events.json").expanduser()
 REMINDERS_FILE = Path("~/.Woody/reminders.json").expanduser()
 
+TOOLS = [
+    "add_calendar_event",
+    "set_reminder",
+    "list_calendar_events",
+    "list_reminders",
+    "delete_reminder",
+    "delete_calendar_event",
+]
+
 
 def _ensure_storage() -> None:
     CALENDAR_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -65,6 +74,22 @@ def _save_reminders(reminders: list[dict]) -> None:
         json.dump(reminders, f, indent=2)
 
 
+MONTH_MAP: dict[str, int] = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+
+
 def _parse_natural_datetime(date_str: str = "", time_str: str = "") -> datetime.datetime:
     """Parse common natural date and time strings into a datetime object."""
     now = datetime.datetime.now()
@@ -72,42 +97,98 @@ def _parse_natural_datetime(date_str: str = "", time_str: str = "") -> datetime.
 
     d_clean = date_str.lower().strip()
     t_clean = time_str.lower().strip()
-
-    # Relative days
-    if "tomorrow" in d_clean or "tomorrow" in t_clean:
-        target_date = now.date() + datetime.timedelta(days=1)
-    elif "day after tomorrow" in d_clean or "day after tomorrow" in t_clean:
-        target_date = now.date() + datetime.timedelta(days=2)
-    elif "today" in d_clean or "tonight" in d_clean:
-        target_date = now.date()
-    else:
-        # Check weekdays
-        weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-        for idx, w in enumerate(weekdays):
-            if w in d_clean or w in t_clean:
-                days_ahead = (idx - now.weekday()) % 7
-                if days_ahead == 0:
-                    days_ahead = 7
-                target_date = now.date() + datetime.timedelta(days=days_ahead)
-                break
+    combo = f"{d_clean} {t_clean}".strip()
 
     # Relative minutes/hours: "in 10 minutes", "in 2 hours", "in 30 mins"
-    in_min_m = re.search(r'in\s+(\d+)\s*(?:min|minute|minutes|m\b)', f"{d_clean} {t_clean}")
+    in_min_m = re.search(r'in\s+(\d+)\s*(?:min|minute|minutes|m\b)', combo)
     if in_min_m:
         mins = int(in_min_m.group(1))
         return now + datetime.timedelta(minutes=mins)
 
-    in_hr_m = re.search(r'in\s+(\d+)\s*(?:hr|hour|hours|h\b)', f"{d_clean} {t_clean}")
+    in_hr_m = re.search(r'in\s+(\d+)\s*(?:hr|hour|hours|h\b)', combo)
     if in_hr_m:
         hrs = int(in_hr_m.group(1))
         return now + datetime.timedelta(hours=hrs)
 
-    # Time parsing
-    target_hour = 12
+    date_matched = False
+
+    # 1. Month names + day number: "15 sep", "15th september", "15 of sept", "sep 15", "september 15th"
+    m_d1 = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]+)\b', combo)
+    if m_d1 and m_d1.group(2).lower() in MONTH_MAP:
+        day = int(m_d1.group(1))
+        month = MONTH_MAP[m_d1.group(2).lower()]
+        year = now.year
+        try:
+            cand = datetime.date(year, month, day)
+            if cand < now.date() and (now.date() - cand).days > 60:
+                cand = datetime.date(year + 1, month, day)
+            target_date = cand
+            date_matched = True
+        except ValueError:
+            pass
+
+    if not date_matched:
+        m_d2 = re.search(r'\b([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?\b', combo)
+        if m_d2 and m_d2.group(1).lower() in MONTH_MAP:
+            day = int(m_d2.group(2))
+            month = MONTH_MAP[m_d2.group(1).lower()]
+            year = now.year
+            try:
+                cand = datetime.date(year, month, day)
+                if cand < now.date() and (now.date() - cand).days > 60:
+                    cand = datetime.date(year + 1, month, day)
+                target_date = cand
+                date_matched = True
+            except ValueError:
+                pass
+
+    if not date_matched:
+        m_d3 = re.search(r'\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b', combo)
+        if m_d3:
+            day = int(m_d3.group(1))
+            month = int(m_d3.group(2))
+            year = int(m_d3.group(3)) if m_d3.group(3) else now.year
+            if year < 100:
+                year += 2000
+            try:
+                cand = datetime.date(year, month, day)
+                if cand < now.date() and (now.date() - cand).days > 60:
+                    cand = datetime.date(year + 1, month, day)
+                target_date = cand
+                date_matched = True
+            except ValueError:
+                pass
+
+    if not date_matched:
+        # Relative days
+        if "tomorrow" in d_clean or "tomorrow" in t_clean:
+            target_date = now.date() + datetime.timedelta(days=1)
+        elif "day after tomorrow" in d_clean or "day after tomorrow" in t_clean:
+            target_date = now.date() + datetime.timedelta(days=2)
+        elif "today" in d_clean or "tonight" in d_clean:
+            target_date = now.date()
+        else:
+            # Check weekdays
+            weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+            for idx, w in enumerate(weekdays):
+                if w in d_clean or w in t_clean:
+                    days_ahead = (idx - now.weekday()) % 7
+                    if days_ahead == 0:
+                        days_ahead = 7
+                    target_date = now.date() + datetime.timedelta(days=days_ahead)
+                    break
+
+    # Time parsing: strip only actual month-day patterns first so day numbers aren't confused with hours
+    month_pat = r'(?:' + '|'.join(MONTH_MAP.keys()) + r')'
+    clean_time_str = re.sub(rf'\b\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?{month_pat}\b', '', combo, flags=re.IGNORECASE)
+    clean_time_str = re.sub(rf'\b{month_pat}\s+\d{{1,2}}(?:st|nd|rd|th)?\b', '', clean_time_str, flags=re.IGNORECASE)
+    clean_time_str = re.sub(r'\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b', '', clean_time_str, flags=re.IGNORECASE)
+
+    target_hour = 9  # Default to 9:00 AM for scheduled events
     target_min = 0
 
     # Match 12-hour or 24-hour time e.g. "3pm", "3:30pm", "15:00", "9 am", "11:30"
-    time_m = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)?', f"{t_clean} {d_clean}")
+    time_m = re.search(r'\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b', clean_time_str)
     if time_m:
         h = int(time_m.group(1))
         m = int(time_m.group(2) or 0)
@@ -117,11 +198,12 @@ def _parse_natural_datetime(date_str: str = "", time_str: str = "") -> datetime.
             h += 12
         elif ampm == "am" and h == 12:
             h = 0
-        elif not ampm and "tonight" in f"{t_clean} {d_clean}" and h < 12:
+        elif not ampm and "tonight" in combo and h < 12:
             h += 12
 
-        target_hour = h
-        target_min = m
+        if h <= 23 and m <= 59:
+            target_hour = h
+            target_min = m
 
     return datetime.datetime(
         year=target_date.year,
@@ -139,17 +221,19 @@ def add_calendar_event(
     duration_minutes: int = 30,
     description: str = "",
     open_app: bool = False,
+    open_google_calendar: bool = False,
 ) -> dict[str, Any]:
     """
     Add an event to the calendar.
 
     Args:
         title: Event title / meeting name.
-        date_str: Date string (e.g. 'tomorrow', 'Monday', '2026-09-15').
+        date_str: Date string (e.g. '15 sep', 'tomorrow', 'Monday', '2026-09-15').
         time_str: Time string (e.g. '3pm', '10:30am').
         duration_minutes: Duration in minutes (default 30).
         description: Optional notes/description.
-        open_app: If true, opens Windows Calendar.
+        open_app: If true, opens Windows Calendar (default False).
+        open_google_calendar: If true, opens event pre-filled in Google Calendar (default False).
     """
     dt = _parse_natural_datetime(date_str=date_str, time_str=time_str)
     end_dt = dt + datetime.timedelta(minutes=duration_minutes)
@@ -169,15 +253,50 @@ def add_calendar_event(
     events.append(event)
     _save_events(events)
 
-    if open_app:
+    # Simultaneously register as a pending reminder
+    reminder = {
+        "id": event_id,
+        "text": title.strip(),
+        "remind_at": dt.strftime("%Y-%m-%d %H:%M"),
+        "status": "pending",
+        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    reminders = _load_reminders()
+    reminders.append(reminder)
+    _save_reminders(reminders)
+
+    gcal_opened = False
+    if open_google_calendar:
+        # Launch Google Calendar in exactly ONE browser tab/window
+        try:
+            import urllib.parse
+            import webbrowser
+            encoded_title = urllib.parse.quote_plus(title.strip())
+            if time_str:
+                dates_param = f"{dt.strftime('%Y%m%dT%H%M00')}/{end_dt.strftime('%Y%m%dT%H%M00')}"
+            else:
+                dates_param = f"{dt.strftime('%Y%m%d')}/{(dt + datetime.timedelta(days=1)).strftime('%Y%m%d')}"
+            gcal_url = f"https://calendar.google.com/calendar/r/eventedit?text={encoded_title}&dates={dates_param}"
+            webbrowser.open(gcal_url)
+            gcal_opened = True
+        except Exception as e:
+            log.warning("calendar.google_open_error", error=str(e))
+
+    elif open_app:
         try:
             os.startfile("ms-calendar:")
         except Exception:
             pass
 
-    formatted_time = dt.strftime("%A, %b %d at %I:%M %p")
-    msg = f"Added '{title}' to your calendar for {formatted_time}."
-    log.info("calendar.event_added", event_id=event_id, title=title, time=formatted_time)
+    has_time = bool(time_str.strip()) or any(w in date_str.lower() for w in ["am", "pm", ":"])
+    formatted_time = dt.strftime("%A, %b %d at %I:%M %p") if has_time else dt.strftime("%A, %b %d")
+
+    if gcal_opened:
+        msg = f"Added '{title}' on {formatted_time} to your calendar and opened Google Calendar."
+    else:
+        msg = f"Added '{title}' on {formatted_time} to your calendar."
+
+    log.info("calendar.event_added", event_id=event_id, title=title, time=formatted_time, google=gcal_opened)
 
     return {
         "success": True,
@@ -185,6 +304,7 @@ def add_calendar_event(
         "event": event,
         "message": msg,
         "formatted_time": formatted_time,
+        "google_calendar_opened": gcal_opened,
     }
 
 

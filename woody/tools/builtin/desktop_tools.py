@@ -526,6 +526,69 @@ def take_screenshot(region: dict | None = None) -> dict:
         return {"success": False, "error": str(e)}
 
 
+def extract_screen_text(img: Any = None, max_chars: int = 3500) -> str:
+    """Extract visible text/code from screen capture using winocr (hardware accelerated) or OCR fallbacks."""
+    if img is None:
+        img = _grab_screen_image()
+    if not img:
+        return ""
+
+    # 1. Windows Media.Ocr (winocr - hardware accelerated, < 50ms)
+    try:
+        import winocr
+        import concurrent.futures
+
+        def _call_winocr():
+            return winocr.recognize_pil_sync(img)
+
+        try:
+            asyncio.get_running_loop()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                res = ex.submit(_call_winocr).result(timeout=1.5)
+        except RuntimeError:
+            res = _call_winocr()
+
+        txt = res.get("text", "").strip()
+        if txt and len(txt) > 10:
+            return txt[:max_chars]
+    except Exception:
+        pass
+
+    # 2. pytesseract fallback
+    try:
+        import pytesseract
+        txt = pytesseract.image_to_string(img).strip()
+        if txt and len(txt) > 10:
+            return txt[:max_chars]
+    except Exception:
+        pass
+
+    return ""
+
+
+async def extract_screen_text_async(img: Any = None, max_chars: int = 3500) -> str:
+    """Extract visible text/code from screen capture asynchronously (< 20ms with winocr)."""
+    if img is None:
+        img = _grab_screen_image()
+    if not img:
+        return ""
+
+    # 1. Windows Media.Ocr async (< 20ms)
+    try:
+        import winocr
+        raw = winocr.recognize_pil(img)
+        res = await winocr.to_coroutine(raw)
+        data = winocr.picklify(res)
+        txt = data.get("text", "").strip()
+        if txt and len(txt) > 10:
+            return txt[:max_chars]
+    except Exception:
+        pass
+
+    # Fallback to sync extract
+    return extract_screen_text(img, max_chars=max_chars)
+
+
 def analyze_screen(custom_prompt: str = "") -> dict:
     """Capture the screen and visually analyze what is currently open, displayed, or if any error is showing (< 20ms).
 
@@ -560,10 +623,12 @@ def analyze_screen(custom_prompt: str = "") -> dict:
     open_windows_str = ", ".join(open_titles[:5]) if open_titles else "None visible"
 
     out_path = ""
+    visible_screen_text = ""
     try:
         img = _grab_screen_image()
         out_path = str(Path(tempfile.gettempdir()) / "woody_screenshot.jpg")
         img.save(out_path, format="JPEG", quality=85)
+        visible_screen_text = extract_screen_text(img)
     except Exception as e:
         log.debug("analyze_screen.capture_fallback", error=str(e))
 
@@ -571,6 +636,8 @@ def analyze_screen(custom_prompt: str = "") -> dict:
     analysis = f"Currently focused on window: '{active_window}'. Open applications: {open_windows_str}."
     if controls_summary:
         analysis += f" Visible UI elements: {controls_summary}."
+    if visible_screen_text:
+        analysis += f"\n\nVisible Content / Code on Screen:\n{visible_screen_text}"
 
     return {
         "success": True,
@@ -578,7 +645,8 @@ def analyze_screen(custom_prompt: str = "") -> dict:
         "open_windows": windows_info,
         "screenshot_path": out_path,
         "analysis": analysis,
-        "visible_text": " | ".join(child_texts[:10]),
+        "visible_text": visible_screen_text or " | ".join(child_texts[:10]),
+        "visible_screen_text": visible_screen_text,
     }
 
 

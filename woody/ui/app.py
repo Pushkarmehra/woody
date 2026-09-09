@@ -82,6 +82,10 @@ class WoodyApp:
         show_action.triggered.connect(self._toggle_overlay)
         menu.addAction(show_action)
 
+        memory_action = QAction("🧠 Memory Window", menu)
+        memory_action.triggered.connect(self._show_memory_window)
+        menu.addAction(memory_action)
+
         activity_action = QAction("Activity Log", menu)
         activity_action.triggered.connect(self._show_activity)
         menu.addAction(activity_action)
@@ -342,6 +346,15 @@ class WoodyApp:
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self._toggle_overlay()
+
+    def _show_memory_window(self) -> None:
+        """Open or focus the Memory Window UI."""
+        log.info("ui.show_memory_window")
+        try:
+            from woody.ui.memory_window import show_memory_window
+            self._memory_window = show_memory_window()
+        except Exception as e:
+            log.error("ui.show_memory_window_failed", error=str(e))
 
     def _show_activity(self) -> None:
         log.info("ui.show_activity")  # TODO: open ActivityPanel

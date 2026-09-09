@@ -23,6 +23,7 @@ from woody.planner.prompts import (
 )
 from woody.planner.working_memory import SubTask, WorkingMemoryState, make_initial_state
 from woody.tools.builtin.browser_tools import BROWSER_EXE_MAP, WEB_PLATFORMS
+from woody.memory.task_window import TaskMemoryWindow
 from woody.utils.logging import get_logger
 from woody.utils.groq_client import Message, GroqClient
 
@@ -45,6 +46,20 @@ class Planner:
         self._router_model = router_model
         self._planner_model = planner_model
         self._session_id = session_id or str(uuid.uuid4())[:8]
+        self.task_window: TaskMemoryWindow = TaskMemoryWindow()
+
+    def _finalize_state(self, state: WorkingMemoryState, user_request: str) -> WorkingMemoryState:
+        """Record the executed turn in TaskMemoryWindow before returning state."""
+        if state.get("subtasks"):
+            st = state["subtasks"][0]
+            self.task_window.record_turn(
+                user_request=user_request,
+                intent=state.get("intent", user_request),
+                agent=st.get("agent", ""),
+                action=st.get("action", ""),
+                params=st.get("params", {}),
+            )
+        return state
 
     async def plan(
         self,
@@ -117,7 +132,7 @@ class Planner:
                     retries=0,
                 ),
             ]
-            return state
+            return self._finalize_state(state, user_request)
 
         # 2. Compound Multi-App Launch (e.g. 'open notepad and calculator')
         if agent == "compound_multi_app":
@@ -139,7 +154,7 @@ class Planner:
                 )
                 for i, app in enumerate(apps)
             ]
-            return state
+            return self._finalize_state(state, user_request)
 
         # 3. Direct Browser Search / Navigation
         if agent == "browser_agent" and direct_action in ("search_site", "navigate_to", "open_url", "search_web"):
@@ -166,7 +181,7 @@ class Planner:
                     retries=0,
                 )
             ]
-            return state
+            return self._finalize_state(state, user_request)
 
         # 4. Direct Memory Commands
         if agent == "memory_agent":
@@ -201,7 +216,7 @@ class Planner:
                     retries=0,
                 )
             ]
-            return state
+            return self._finalize_state(state, user_request)
 
         if agent == "chat_agent":
             state["is_simple"] = True
@@ -220,7 +235,7 @@ class Planner:
                     retries=0,
                 )
             ]
-            return state
+            return self._finalize_state(state, user_request)
 
         if agent == "react_agent":
             state["is_simple"] = False
@@ -239,7 +254,7 @@ class Planner:
                     retries=0,
                 )
             ]
-            return state
+            return self._finalize_state(state, user_request)
 
         if agent != "planner" and direct_action and confidence >= 0.75:
             # Simple command — create a single subtask directly
@@ -259,10 +274,12 @@ class Planner:
                     retries=0,
                 )
             ]
-            return state
 
-        # Phase 2: Full decomposition
-        return await self._decompose(state)
+        else:
+            # Phase 2: Full decomposition
+            state = await self._decompose(state)
+
+        return self._finalize_state(state, user_request)
 
     # ── Pattern Parsers ───────────────────────────────────────────────────────
 
@@ -505,9 +522,11 @@ class Planner:
         rem_m = re.match(r'^(?:remember\s+that\s+|remember\s+|store\s+that\s+|memorize\s+that\s+|memorize\s+)(.*)$', req, re.IGNORECASE)
         if rem_m:
             body = rem_m.group(1).strip()
+            if body.lower().startswith("to "):
+                return None  # Reminder: 'remember to <task>'
             # Check if it's 'my <key> is <value>' or '<key> is <value>'
             fact_m = re.match(r'^(?:my\s+)?([a-zA-Z0-9\s_\-\'\"]+?)\s+(?:is|are|=|:)\s+(.*)$', body, re.IGNORECASE)
-            if fact_m and not body.lower().startswith("to "):
+            if fact_m:
                 key = fact_m.group(1).strip()
                 val = fact_m.group(2).strip().strip("'\"")
                 return {
@@ -616,15 +635,16 @@ class Planner:
     def _parse_calendar_and_reminder_commands(self, request: str) -> dict | None:
         """
         Parse calendar scheduling and reminder commands:
-          1. "remind me to <task> in 10 minutes / at 5pm / tomorrow"
-          2. "remind me in 10 minutes to <task>"
-          3. "remember to <task> [at/in/on <time>]"
-          4. "set a reminder to/for <task> [at/in/on <time>]"
-          5. "add <event> to my calendar [tomorrow at 3pm]"
-          6. "schedule a meeting with <who> [on Friday at 4pm]"
-          7. "what are my reminders" / "list reminders"
-          8. "what's on my calendar" / "list calendar events"
-          9. "delete reminder <target>" / "delete calendar event <target>"
+          1. "add a reminder in my calander of 15 sep about my birthday in google calender"
+          2. "remind me to <task> in 10 minutes / at 5pm / tomorrow"
+          3. "remind me in 10 minutes to <task>"
+          4. "remember to <task> [at/in/on <time>]"
+          5. "set a reminder to/for <task> [at/in/on <time>]"
+          6. "add <event> to my calendar [tomorrow at 3pm]"
+          7. "schedule a meeting with <who> [on Friday at 4pm]"
+          8. "what are my reminders" / "list reminders"
+          9. "what's on my calendar" / "list calendar events"
+          10. "delete reminder <target>" / "delete calendar event <target>"
         """
         req = self._clean_req(request).strip()
         req_lower = req.lower().strip("?!., \t")
@@ -678,71 +698,79 @@ class Planner:
                 "params": {"target": target},
             }
 
-        # 5. Setting Reminders
-        # Pattern: "remind me in/at <time> to <task>"
-        m_rem_time_first = re.match(
-            r'^(?:remind\s+me|set\s+a\s+reminder|set\s+reminder)\s+(?:in|at|on)\s+(.+?)\s+to\s+(.+)$',
-            req,
-            re.IGNORECASE,
-        )
-        if m_rem_time_first:
-            time_part = m_rem_time_first.group(1).strip()
-            task_part = m_rem_time_first.group(2).strip()
-            return {
-                "agent": "system_agent",
-                "confidence": 1.0,
-                "direct_action": "set_reminder",
-                "params": {"text": task_part, "time_str": time_part, "date_str": time_part},
-            }
+        # 5. Adding reminder / calendar event (Flexible natural language parser)
+        cal_pattern = r'\b(?:google\s+)?(?:calendar|calander|calender|calndar|cal)\b'
+        is_calendar_query = bool(re.search(cal_pattern, req, re.IGNORECASE))
+        is_reminder_query = bool(re.search(r'\b(?:reminder|remind\s+me|remember\s+to)\b', req, re.IGNORECASE))
+        is_schedule_query = bool(re.search(r'\b(?:schedule|add\s+event|create\s+event)\b', req, re.IGNORECASE))
+        is_google = bool(re.search(r'\bgoogle\b', req, re.IGNORECASE))
 
-        # Pattern: "remind me to <task> [at/in/on <time>]" or "remember to <task> [at/in/on <time>]"
-        m_rem_task = re.match(
-            r'^(?:remind\s+me\s+to|remind\s+me|remember\s+to|set\s+(?:a\s+)?reminder\s+(?:to|for))\s+(.+)$',
-            req,
-            re.IGNORECASE,
-        )
-        if m_rem_task:
-            body = m_rem_task.group(1).strip()
-            time_m = re.search(r'\s+(?:in\s+\d+|at\s+\d+|on\s+\w+|for\s+\w+|tomorrow|tonight|today|next\s+\w+).*$', body, re.IGNORECASE)
-            time_str = ""
-            text_str = body
-            if time_m:
-                time_str = time_m.group(0).strip()
-                text_str = body[:time_m.start()].strip()
-            return {
-                "agent": "system_agent",
-                "confidence": 1.0,
-                "direct_action": "set_reminder",
-                "params": {"text": text_str, "time_str": time_str, "date_str": time_str},
-            }
+        if is_calendar_query or is_reminder_query or is_schedule_query:
+            clean = re.sub(r'\b(?:in|on|to|into)\s+(?:my\s+)?(?:google\s+)?(?:calendar|calander|calender|calndar)\b', '', req, flags=re.IGNORECASE).strip()
+            clean = re.sub(r'\b(?:google\s+)?(?:calendar|calander|calender|calndar)\b', '', clean, flags=re.IGNORECASE).strip()
 
-        # 6. Calendar Events
-        cal_add_m1 = re.match(r'^(?:add|put)\s+(.+?)\s+(?:to|on|in)\s+(?:my\s+)?calendar(?:\s+(.+))?$', req, re.IGNORECASE)
-        if cal_add_m1:
-            title = cal_add_m1.group(1).strip()
-            time_part = (cal_add_m1.group(2) or "").strip()
-            return {
-                "agent": "system_agent",
-                "confidence": 1.0,
-                "direct_action": "add_calendar_event",
-                "params": {"title": title, "time_str": time_part, "date_str": time_part},
-            }
+            months = r'(?:january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)'
+            date_patterns = [
+                rf'\b(?:of|on|for|at|in)?\s*(\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?{months}(?:\s+at\s+\S+)?)\b',
+                rf'\b(?:of|on|for|at|in)?\s*({months}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:\s+at\s+\S+)?)\b',
+                rf'\b(?:of|on|for|at|in)?\s*(\d{{1,2}}[/-]\d{{1,2}}(?:[/-]\d{{2,4}})?(?:\s+at\s+\S+)?)\b',
+                r'\b(?:of|on|for|at|in)?\s*((?:tomorrow|today|tonight)(?:\s+at\s+\S+)?)\b',
+                r'\b(?:of|on|for|at|in)?\s*((?:next\s+\w+|(?:mon|tues|wed|wednes|thu|thur|thurs|fri|sat|satur|sun)day)(?:\s+at\s+\S+)?)\b',
+                r'\b(in\s+\d+\s*(?:min|minute|minutes|hr|hour|hours))\b',
+                r'\b(?:at|on)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b',
+            ]
 
-        cal_add_m2 = re.match(r'^(?:add\s+to\s+(?:my\s+)?calendar(?:\s*:|\s+)|schedule\s+(?:a\s+)?(?:meeting|event|task|call)?(?:\s*:|\s+)|create\s+(?:a\s+)?calendar\s+event(?:\s*:|\s+))\s*(.+)$', req, re.IGNORECASE)
-        if cal_add_m2:
-            body = cal_add_m2.group(1).strip()
-            time_m = re.search(r'\s+(?:in\s+\d+|at\s+\d+|on\s+\w+|for\s+\w+|tomorrow|tonight|today|next\s+\w+).*$', body, re.IGNORECASE)
-            time_str = ""
-            title_str = body
-            if time_m:
-                time_str = time_m.group(0).strip()
-                title_str = body[:time_m.start()].strip()
-            return {
-                "agent": "system_agent",
-                "confidence": 1.0,
-                "direct_action": "add_calendar_event",
-                "params": {"title": title_str, "time_str": time_str, "date_str": time_str},
-            }
+            date_part = ''
+            span = None
+            for pat in date_patterns:
+                m = re.search(pat, clean, re.IGNORECASE)
+                if m:
+                    date_part = m.group(1).strip()
+                    span = m.span(0)
+                    break
+
+            if span:
+                subject = (clean[:span[0]] + ' ' + clean[span[1]:]).strip()
+            else:
+                subject = clean
+
+            # Clean subject
+            subject = re.sub(r'^(?:add|put|set|create|schedule|remind\s+me)\s+(?:a\s+)?(?:reminder|task)?\s*(?:about|for|to)?', '', subject, flags=re.IGNORECASE)
+            subject = re.sub(r'^(?:about|for|to)\s+', '', subject.strip(), flags=re.IGNORECASE).strip()
+            subject = re.sub(r'\s+(?:about|for|to)$', '', subject.strip(), flags=re.IGNORECASE).strip()
+            subject = re.sub(r'\s+(?:reminder|event|task)$', '', subject.strip(), flags=re.IGNORECASE).strip()
+            if subject.lower().startswith("my "):
+                subject = subject[3:].strip()
+            if subject.lower() in ("birthday", "bday"):
+                subject = "Birthday"
+            elif subject:
+                subject = subject[0].upper() + subject[1:]
+            if not subject:
+                subject = "Reminder"
+
+            if is_calendar_query or is_schedule_query:
+                return {
+                    "agent": "system_agent",
+                    "confidence": 1.0,
+                    "direct_action": "add_calendar_event",
+                    "params": {
+                        "title": subject,
+                        "date_str": date_part,
+                        "time_str": "",
+                        "open_google_calendar": is_google,
+                    },
+                }
+            else:
+                return {
+                    "agent": "system_agent",
+                    "confidence": 1.0,
+                    "direct_action": "set_reminder",
+                    "params": {
+                        "text": subject,
+                        "date_str": date_part,
+                        "time_str": date_part,
+                    },
+                }
 
         return None
 
@@ -795,6 +823,12 @@ class Planner:
         """Fast intent classification via rules or small model."""
         req = user_request.lower().strip()
         effective_req = self._clean_req(req)
+
+        # 0. Active Task & Conversation Memory Window resolution
+        # Resolves follow-ups, date/time answers to previous questions, and continuation commands
+        window_res = self.task_window.resolve_turn_with_window(user_request)
+        if window_res:
+            return window_res
 
         # 1. Calendar & Reminder Commands (e.g. 'remind me to...', 'add meeting to calendar...')
         cal_rem_cmd = self._parse_calendar_and_reminder_commands(user_request)
@@ -883,7 +917,12 @@ class Planner:
             "see my screen", "look at my screen", "read my screen", "scan my screen",
             "analyze screen", "analyze my screen", "describe my screen", "describe the screen",
             "explain what's on my screen", "explain this error", "what do you see",
-            "check my screen", "view my screen", "what am i looking at", "what is open"
+            "check my screen", "view my screen", "what am i looking at", "what is open",
+            "whats wrong on my screen", "what's wrong on my screen", "what is wrong on my screen",
+            "wrong with this code", "wrong with the code", "wrong with my code",
+            "check this code", "check my code", "why is my code", "why is this code",
+            "bug in this code", "error in this code", "find error in code", "debug this code",
+            "debug my code", "fix this code on screen", "fix code on screen",
         ]):
             return {"agent": "vision_agent", "confidence": 1.0, "direct_action": "analyze_screen"}
 

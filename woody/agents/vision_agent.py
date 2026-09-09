@@ -104,22 +104,56 @@ class VisionAgent(BaseAgent):
         base_prompt = params.get("custom_prompt") or prompt_map.get(action, f"Describe what is on screen in '{window_title}'.")
         extra = params.get("extra_context", "")
 
-        # Fast synthesis prompt with rich Win32 UI Automation tree context (< 5ms)
-        synth_prompt = (
-            f"Active Focused Window: '{window_title}'\n"
-            f"Open Applications: {open_str}\n"
-            f"Visible UI Controls & Elements: {controls_str}\n"
-        )
-        if extra:
-            synth_prompt += f"Extra Context: {extra}\n"
+        # Extract visible screen text / code via fast hardware-accelerated OCR
+        screen_text = ""
+        try:
+            from woody.tools.builtin.desktop_tools import extract_screen_text_async, _grab_screen_image
+            img = _grab_screen_image()
+            if img:
+                screen_text = await extract_screen_text_async(img)
+        except Exception:
+            pass
 
-        synth_prompt += (
-            f"\nUser Intent: {base_prompt}\n\n"
-            "Instructions:\n"
-            "- Provide a confident, natural, and direct 1-2 sentence response describing what is on their screen.\n"
-            "- Highlight the specific active application and open document/tabs.\n"
-            "- Never say you cannot see the screen or that vision is unavailable."
-        )
+        if not screen_text and context.get("screen_context"):
+            screen_text = context["screen_context"]
+
+        is_code_or_error_query = any(w in base_prompt.lower() for w in [
+            "code", "error", "wrong", "bug", "failing", "syntax", "fix", "issue", "problem", "inspect", "debug"
+        ])
+
+        if is_code_or_error_query and screen_text:
+            synth_prompt = (
+                f"Active Focused Window: '{window_title}'\n"
+                f"Open Applications: {open_str}\n"
+                f"Visible Code / Text on Screen (extracted via OCR):\n{screen_text}\n\n"
+                f"User Question / Intent: {base_prompt}\n\n"
+                "Instructions:\n"
+                "- The user is asking what is wrong with the code or text on their screen.\n"
+                "- Carefully analyze the Visible Code / Text on Screen above.\n"
+                "- Identify and explain all syntax errors (e.g. missing semicolons in C++/Java/JS, typos, undeclared variables) or bugs clearly and directly.\n"
+                "- Provide the complete, clean corrected code snippet ready to copy and run.\n"
+                "- Be helpful, clear, and confident."
+            )
+            max_tokens = 700
+        else:
+            synth_prompt = (
+                f"Active Focused Window: '{window_title}'\n"
+                f"Open Applications: {open_str}\n"
+                f"Visible UI Controls & Elements: {controls_str}\n"
+            )
+            if screen_text:
+                synth_prompt += f"Visible Text on Screen:\n{screen_text[:600]}\n"
+            if extra:
+                synth_prompt += f"Extra Context: {extra}\n"
+
+            synth_prompt += (
+                f"\nUser Intent: {base_prompt}\n\n"
+                "Instructions:\n"
+                "- Provide a confident, natural, and direct response describing what is on their screen.\n"
+                "- Highlight the specific active application and open document/tabs.\n"
+                "- Never say you cannot see the screen or that vision is unavailable."
+            )
+            max_tokens = 250
 
         # 1. If LLM is available, synthesize in ~300ms
         if self._client and hasattr(self._client, "chat"):
@@ -128,18 +162,19 @@ class VisionAgent(BaseAgent):
                     messages=[
                         Message(
                             role="system",
-                            content="You are Woody, an intelligent Windows operating system assistant with real-time screen awareness.",
+                            content="You are Woody, an intelligent Windows operating system assistant with real-time screen and code awareness.",
                         ),
                         Message(role="user", content=synth_prompt),
                     ],
                     temperature=0.2,
-                    max_tokens=180,
+                    max_tokens=max_tokens,
                 )
                 analysis_text = chat_resp.content.strip()
                 return AgentResult(success=True, output={
                     "action": action,
                     "analysis": analysis_text,
                     "window": window_title,
+                    "visible_text": screen_text[:500],
                     "model": "fast_perception+llm",
                 })
             except Exception as e:
